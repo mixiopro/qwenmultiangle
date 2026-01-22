@@ -2337,7 +2337,7 @@ const easings = {
 async function generateTransitionVideo() {
     // Include the original input image as the FIRST frame, then the generated keyframes.
     const genKeyframes = pathState.waypoints.filter(wp => wp.generatedImageUrl);
-    const sourceUrl = pathState.sourceImageUrl || pathState.imageUrl;
+    const sourceUrl = await ensurePathSourceImageUrl();
     if (!sourceUrl) {
         showPathStatus('Missing input image for video start frame. Go to Multi-image and upload an image first.', 'error');
         return;
@@ -2345,6 +2345,7 @@ async function generateTransitionVideo() {
     // Use first keyframe's params to drive direction for the source frame (purely for transition heuristics)
     const ref = genKeyframes[0] || { azimuth: 0, elevation: 0, distance: 5 };
     const keyframes = [{ ...ref, generatedImageUrl: sourceUrl, isSource: true }, ...genKeyframes];
+    addPathLog(`Quick video frames: source+${genKeyframes.length} keyframes = ${keyframes.length}`, 'info');
     if (keyframes.length < 2) {
         showPathStatus('Need at least 2 generated keyframes', 'error');
         return;
@@ -2603,13 +2604,14 @@ async function generateAIVideo() {
         showPathStatus('Need at least 1 generated keyframe (run Multi-image first)', 'error');
         return;
     }
-    const sourceUrl = pathState.sourceImageUrl || pathState.imageUrl;
+    const sourceUrl = await ensurePathSourceImageUrl();
     if (!sourceUrl) {
         showPathStatus('Missing input image for video start frame. Go to Multi-image and upload an image first.', 'error');
         return;
     }
     const ref = genKeyframes[0];
     const keyframes = [{ ...ref, generatedImageUrl: sourceUrl, isSource: true }, ...genKeyframes];
+    addPathLog(`AI video frames: source+${genKeyframes.length} keyframes = ${keyframes.length}`, 'info');
     
     pathState.isGeneratingVideos = true;
     pathState.segmentVideos = [];
@@ -2676,6 +2678,7 @@ async function generateAIVideo() {
     const speedMultiplier = seedanceSegmentSeconds / Math.max(0.5, pairSeconds);
     const loopPath = !!pathElements.aiLoopPath?.checked;
     const totalSegments = loopPath ? keyframes.length : (keyframes.length - 1);
+    addPathLog(`Segments to generate: ${totalSegments} (loop=${loopPath}) | expected_duration≈${(totalSegments * pairSeconds).toFixed(1)}s`, 'info');
     const keyframeUrls = keyframes.map(k => k.generatedImageUrl);
     const cacheKey = buildSeedanceSegmentsCacheKey({
         keyframeUrls,

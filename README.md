@@ -1,9 +1,6 @@
 # Qwen Multi-Angle Camera Control
 
-A modern web app for controlling camera angles on images using the Qwen Image Edit model with the Multi-Angles LoRA via the fal.ai API.
-
-![Preview](https://img.shields.io/badge/Three.js-black?style=flat&logo=three.js&logoColor=white)
-![fal.ai](https://img.shields.io/badge/fal.ai-API-blue)
+A small web app that lets you adjust a virtual camera (azimuth, elevation, zoom) and generate alternate views of an image using fal.ai’s Qwen Image Edit “multiple angles” model.
 
 ## Screenshot
 
@@ -11,11 +8,10 @@ A modern web app for controlling camera angles on images using the Qwen Image Ed
 
 ## Features
 
-- 🎮 **3D Camera Control** - Interactive Three.js viewport with draggable handles for azimuth, elevation, and distance
-- 🎚️ **Slider Controls** - Manual control via intuitive sliders
-- 🖼️ **Real-time Preview** - See your uploaded image in the 3D scene
-- ⚡ **Fast Generation** - Powered by fal.ai's infrastructure
-- 📱 **Responsive** - Works on desktop and mobile
+- Interactive Three.js camera controls (drag handles + sliders)
+- Works with an uploaded image or an image URL
+- Multi-image keyframes + camera motion (image-to-video) mode
+- API key is stored locally in your browser (localStorage)
 
 ## Credits & Inspiration
 
@@ -27,44 +23,17 @@ Powered by [fal.ai - Qwen Image Edit 2511 Multiple Angles](https://fal.ai/models
 
 ### Prerequisites
 
-- Node.js 18+ (for local development/deployment)
-- A fal.ai API key - [Get your key here](https://fal.ai/dashboard/keys)
+- Node.js 18+
+- A fal.ai API key ([create one](https://fal.ai/dashboard/keys))
 
 ### Local Development
 
-1. Clone the repository:
-   ```bash
-   git clone <your-repo-url>
-   cd qwenmultiangle
-   ```
+```bash
+npm install
+npm start
+```
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Start the server:
-   ```bash
-   npm start
-   ```
-
-4. Open http://localhost:3000 in your browser
-
-5. Enter your fal.ai API key in the app
-
-### Deploy to Railway
-
-1. Push this code to a GitHub repository
-
-2. Go to [Railway](https://railway.app) and create a new project
-
-3. Select "Deploy from GitHub repo"
-
-4. Select your repository
-
-5. Railway will automatically detect the Node.js app and deploy it
-
-6. Your app will be live at the provided Railway URL!
+Then open `http://localhost:3000` and paste your fal.ai API key into the header input.
 
 ## Project Structure
 
@@ -82,24 +51,10 @@ qwenmultiangle/
 
 | Control | Range | Description |
 |---------|-------|-------------|
-| **Azimuth** | 0° - 315° | Horizontal rotation (front, right, back, left) |
-| **Elevation** | -30° - 60° | Vertical angle (low, eye-level, high) |
-| **Distance** | 0.6 - 1.8 | Camera distance (close-up, medium, wide) |
-
-## Prompt Format
-
-The app generates prompts in the format:
-```
-<sks> [azimuth view] [elevation shot] [distance shot]
-```
-
-Example: `<sks> front-right quarter view elevated shot close-up`
+| **Azimuth** (`horizontal_angle`) | 0° - 360° | Horizontal rotation (front/right/back/left) |
+| **Elevation** (`vertical_angle`) | -30° - 90° | Vertical angle (low → bird’s-eye) |
+| **Zoom** (`zoom`) | 0 - 10 | Wide → close-up |
 
 ## License
 
 MIT
-
----
-
-Powered by [fal.ai](https://fal.ai/models/fal-ai/qwen-image-edit-2511-multiple-angles/)
-
