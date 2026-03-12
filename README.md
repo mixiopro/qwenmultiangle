@@ -1,6 +1,6 @@
 # Mixio Multi-Angle Camera Control
 
-A small web app that lets you adjust a virtual camera (azimuth, elevation, zoom) and generate alternate views of an image using Mixio’s Qwen Image Edit “multiple angles” model.
+A small web app that lets you adjust a virtual camera (azimuth, elevation, zoom) and generate alternate views of an image using Mixio’s multi-angle image workflow.
 
 ## Screenshot
 
@@ -11,7 +11,7 @@ A small web app that lets you adjust a virtual camera (azimuth, elevation, zoom)
 - Interactive Three.js camera controls (drag handles + sliders)
 - Works with an uploaded image or an image URL
 - Multi-image keyframes + camera motion (image-to-video) mode
-- API key is stored locally in your browser (localStorage)
+- Backend-managed API access using environment configuration
 
 ## Credits & Inspiration
 
@@ -24,7 +24,7 @@ Powered by Mixio
 ### Prerequisites
 
 - Node.js 18+
-- A Mixio API key
+- A backend environment variable: `FAL_API_KEY`
 
 ### Local Development
 
@@ -33,7 +33,7 @@ npm install
 npm start
 ```
 
-Then open `http://localhost:3000` and paste your Mixio API key into the header input.
+Then open `http://localhost:3000`. The app uses the backend `FAL_API_KEY` environment variable; no API key is entered in the UI.
 
 ## Project Structure
 
@@ -41,8 +41,8 @@ Then open `http://localhost:3000` and paste your Mixio API key into the header i
 qwenmultiangle/
 ├── index.html      # Main HTML structure
 ├── style.css       # Modern dark theme styling
-├── app.js          # Three.js scene + API integration
-├── server.js       # Express server for static file serving
+├── app.js          # Three.js scene + frontend app logic
+├── server.js       # Express server + backend API proxy
 ├── package.json    # Node.js dependencies
 └── README.md       # This file
 ```

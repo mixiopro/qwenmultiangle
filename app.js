@@ -1,13 +1,5 @@
-// ===== Import fal client =====
-import { fal } from "https://esm.sh/@fal-ai/client@1.2.1";
-
 // ===== Configuration =====
 const CONFIG = {
-    FAL_MODEL_ID: 'fal-ai/qwen-image-edit-2511-multiple-angles',
-    SEEDANCE_MODEL_ID: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video',
-    KLING26_MODEL_ID: 'fal-ai/kling-video/v2.6/standard/image-to-video',
-    VEO31_FLF_MODEL_ID: 'fal-ai/veo3.1/fast/first-last-frame-to-video',
-    LTX2_MODEL_ID: 'fal-ai/ltx-2-19b/image-to-video',
     MAX_SEED: 2147483647,
     MAX_WAYPOINTS: 4,
     MIN_WAYPOINTS: 2
@@ -105,7 +97,7 @@ function hashStringFNV1a(input) {
     return (h >>> 0).toString(16);
 }
 
-function buildSeedanceSegmentsCacheKey({ keyframeUrls, prompt, resolution, seedanceSeconds, loop, modelId }) {
+function buildSeedanceSegmentsCacheKey({ keyframeUrls, prompt, resolution, seedanceSeconds, loop, modelKey }) {
     // IMPORTANT: do NOT include per-pair seconds here (so you can re-stitch without re-generating)
     const payload = JSON.stringify({
         keyframeUrls,
@@ -113,17 +105,11 @@ function buildSeedanceSegmentsCacheKey({ keyframeUrls, prompt, resolution, seeda
         resolution,
         seedanceSeconds,
         loop: !!loop,
-        modelId: modelId || CONFIG.SEEDANCE_MODEL_ID
+        modelKey: modelKey || 'seedance'
     });
     return `seg_${hashStringFNV1a(payload)}`;
 }
 
-function resolveAIVideoModelId(modelKey) {
-    if (modelKey === 'kling26') return CONFIG.KLING26_MODEL_ID;
-    if (modelKey === 'veo31') return CONFIG.VEO31_FLF_MODEL_ID;
-    if (modelKey === 'ltx2') return CONFIG.LTX2_MODEL_ID;
-    return CONFIG.SEEDANCE_MODEL_ID; // default
-}
 
 // ===== MP4 Transcoding (ffmpeg.wasm) =====
 let _ffmpegCtx = null;
@@ -235,8 +221,7 @@ function updateSliderValues() {
 
 function updateGenerateButton() {
     const hasImage = state.uploadedImage !== null || state.imageUrl !== null;
-    const hasApiKey = elements.apiKey.value.trim().length > 0;
-    elements.generateBtn.disabled = !hasImage || !hasApiKey || state.isGenerating;
+    elements.generateBtn.disabled = !hasImage || state.isGenerating;
 }
 
 function showStatus(message, type = 'info') {
@@ -1134,15 +1119,43 @@ function loadImageFromUrl(url) {
     }
 }
 
+// ===== Backend API Helpers =====
+async function apiRequest(url, options = {}) {
+    const response = await fetch(url, options);
+    const contentType = response.headers.get('content-type') || '';
+    const isJson = contentType.includes('application/json');
+    const payload = isJson ? await response.json() : await response.text();
+
+    if (!response.ok) {
+        const message = isJson
+            ? (payload?.error || payload?.message || JSON.stringify(payload))
+            : String(payload || `Request failed (${response.status})`);
+        const err = new Error(message);
+        err.status = response.status;
+        err.body = payload;
+        throw err;
+    }
+
+    return payload;
+}
+
+async function uploadImageToBackend(file) {
+    const formData = new FormData();
+    formData.append('image', file);
+    const result = await apiRequest('/api/upload', {
+        method: 'POST',
+        body: formData
+    });
+
+    if (!result?.url) {
+        throw new Error('Upload succeeded but no URL was returned.');
+    }
+
+    return result.url;
+}
+
 // ===== API Call =====
 async function generateImage() {
-    const apiKey = elements.apiKey.value.trim();
-    if (!apiKey) {
-        showStatus('Please enter your Mixio API key', 'error');
-        addLog('Error: No API key provided', 'error');
-        return;
-    }
-    
     if (!state.uploadedImage && !state.imageUrl) {
         showStatus('Please upload an image or provide a URL', 'error');
         addLog('Error: No image provided', 'error');
@@ -1178,130 +1191,61 @@ async function generateImage() {
     
     hideStatus();
     
-    // Configure fal client with API key
-    fal.config({
-        credentials: apiKey
-    });
-    
-    addLog(`Configuring API client...`, 'info');
-    addLog(`Model: ${CONFIG.FAL_MODEL_ID}`, 'info');
+    addLog('Calling backend generation API...', 'info');
     addLog(`Camera: horizontal_angle=${state.azimuth}°, vertical_angle=${state.elevation}°, zoom=${state.distance}`, 'info');
     
     try {
-        let imageUrl;
-        
-        // Use direct URL if provided, otherwise upload the file
-        if (state.imageUrl) {
-            imageUrl = state.imageUrl;
-            addLog(`Using provided URL: ${imageUrl}`, 'info');
-        } else {
-            // Upload the image to fal storage
+        let imageUrl = state.imageUrl;
+
+        if (!imageUrl) {
             showStatus('Uploading image...', 'info');
-            addLog(`Uploading image to storage...`, 'request');
-            
-            imageUrl = await fal.storage.upload(state.uploadedImage);
+            addLog('Uploading image via backend...', 'request');
+            imageUrl = await uploadImageToBackend(state.uploadedImage);
             addLog(`Image uploaded: ${imageUrl}`, 'response');
+        } else {
+            addLog(`Using provided URL: ${imageUrl}`, 'info');
         }
         
-        // Now run the model
         showStatus('Generating... This may take a moment.', 'info');
-        addLog(`Starting model inference...`, 'request');
-        
-        // fal.ai API uses numeric parameters for camera control (NOT text prompt!)
-        // horizontal_angle: 0-360 (0=front, 90=right, 180=back, 270=left)
-        // vertical_angle: -30 to 90 (-30=low-angle, 0=eye-level, 30=elevated, 60=high-angle, 90=bird's-eye)
-        // zoom: 0-10 (0=wide/far, 5=medium, 10=close-up)
-        const input = {
-            image_urls: [imageUrl],
-            horizontal_angle: state.azimuth,
-            vertical_angle: state.elevation,
-            zoom: state.distance
-        };
-        
-        addLog(`Input: ${JSON.stringify(input, null, 2)}`, 'request');
-        
-        const result = await fal.run(CONFIG.FAL_MODEL_ID, {
-            input: input
+
+        const result = await apiRequest('/api/generate-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                imageUrl,
+                horizontal_angle: state.azimuth,
+                vertical_angle: state.elevation,
+                zoom: state.distance
+            })
         });
-        
-        addLog(`Result received!`, 'response');
-        
-        // Log the result structure
-        try {
-            addLog(`Result: ${JSON.stringify(result, null, 2)}`, 'response');
-        } catch (e) {
-            addLog(`Could not stringify result: ${e.message}`, 'error');
-        }
-        
-        // fal.run returns { data, requestId } - extract data
-        const data = result.data || result;
-        addLog(`Data keys: ${Object.keys(data || {}).join(', ')}`, 'response');
-        
-        // Handle result - the response should have images[0].url
-        let outputImageUrl = null;
-        
-        // Try data.images (most likely for fal.run)
-        if (data?.images?.[0]?.url) {
-            outputImageUrl = data.images[0].url;
-            addLog(`Found: data.images[0].url = ${outputImageUrl}`, 'response');
-        }
-        // Try direct result.images
-        else if (result?.images?.[0]?.url) {
-            outputImageUrl = result.images[0].url;
-            addLog(`Found: result.images[0].url = ${outputImageUrl}`, 'response');
-        }
-        
-        if (outputImageUrl) {
-            elements.outputImage.src = outputImageUrl;
-            elements.outputImage.classList.remove('hidden');
-            elements.outputPlaceholder.classList.add('hidden');
-            elements.downloadBtn.classList.remove('hidden');
-            
-            // Trigger success animation
-            elements.outputContainer.classList.add('success');
-            setTimeout(() => {
-                elements.outputContainer.classList.remove('success');
-            }, 600);
-            
-            addLog(`Success! Image URL: ${outputImageUrl.substring(0, 80)}...`, 'info');
-            showStatus('Image generated successfully!', 'success');
-        }
-        
-        // Fallback: try to find any fal.media URL in the result
-        if (!outputImageUrl) {
-            addLog('Trying regex fallback...', 'warn');
-            const resultStr = JSON.stringify(result);
-            const urlMatch = resultStr.match(/https:\/\/[^"]*fal\.media[^"]*/);
-            if (urlMatch) {
-                outputImageUrl = urlMatch[0];
-                addLog(`Found URL via regex: ${outputImageUrl}`, 'warn');
-            }
-        }
-        
+
+        const outputImageUrl = result?.imageUrl;
+
         if (!outputImageUrl) {
             addLog('Error: Could not extract image URL from response', 'error');
             throw new Error('No image in response. Check logs for details.');
         }
+
+        elements.outputImage.src = outputImageUrl;
+        elements.outputImage.classList.remove('hidden');
+        elements.outputPlaceholder.classList.add('hidden');
+        elements.downloadBtn.classList.remove('hidden');
+
+        // Trigger success animation
+        elements.outputContainer.classList.add('success');
+        setTimeout(() => {
+            elements.outputContainer.classList.remove('success');
+        }, 600);
+
+        addLog(`Success! Image URL: ${outputImageUrl.substring(0, 80)}...`, 'info');
+        showStatus('Image generated successfully!', 'success');
+
         
     } catch (error) {
         console.error('Generation error:', error);
-        let errorMsg;
-        
-        // Handle specific error types
-        if (error.message && error.message.includes('fetch')) {
-            errorMsg = 'Network error - check your internet connection';
-        } else if (error.status === 401 || error.message?.includes('401')) {
-            errorMsg = 'Invalid API key. Please check your Mixio API key.';
-        } else if (error.status === 422 || error.message?.includes('422')) {
-            errorMsg = 'Invalid request format. Check the logs for details.';
-        } else if (error.body) {
-            errorMsg = formatError(error.body);
-        } else {
-            errorMsg = formatError(error);
-        }
-        
+        const errorMsg = formatError(error?.body || error);
         addLog(`Error: ${errorMsg}`, 'error');
-        if (error.body) {
+        if (error?.body && typeof error.body === 'object') {
             addLog(`Error body: ${JSON.stringify(error.body, null, 2)}`, 'error');
         }
         showStatus(`Error: ${errorMsg}`, 'error');
@@ -1343,15 +1287,6 @@ async function downloadImage() {
 
 // ===== Event Listeners Setup =====
 function setupEventListeners() {
-    // API Key toggle visibility
-    elements.toggleKey.addEventListener('click', () => {
-        const input = elements.apiKey;
-        input.type = input.type === 'password' ? 'text' : 'password';
-    });
-    
-    // API Key change
-    elements.apiKey.addEventListener('input', updateGenerateButton);
-    
     // Image upload - click
     elements.uploadZone.addEventListener('click', () => {
         elements.imageInput.click();
@@ -1536,7 +1471,7 @@ async function ensurePathSourceImageUrl() {
     // If user uploaded a file, upload once and cache URL
     if (pathState.uploadedImage) {
         addPathLog('Uploading source image (for video start frame)...', 'request');
-        const url = await fal.storage.upload(pathState.uploadedImage);
+        const url = await uploadImageToBackend(pathState.uploadedImage);
         pathState.sourceImageUrl = url;
         addPathLog(`Source image uploaded: ${url}`, 'response');
         return url;
@@ -1989,18 +1924,17 @@ function updateWaypointsList() {
 
 function updatePathButtons() {
     const hasImage = pathState.uploadedImage || pathState.imageUrl;
-    const hasApiKey = elements.apiKey?.value.trim().length > 0;
     const hasEnoughWaypoints = pathState.waypoints.length >= CONFIG.MIN_WAYPOINTS;
-    
+
     if (pathElements.generateKeyframesBtn) {
-        pathElements.generateKeyframesBtn.disabled = !hasImage || !hasApiKey || !hasEnoughWaypoints || pathState.isGeneratingKeyframes;
+        pathElements.generateKeyframesBtn.disabled = !hasImage || !hasEnoughWaypoints || pathState.isGeneratingKeyframes;
     }
-    
+
     const allKeyframesGenerated = pathState.waypoints.length >= 2 && pathState.waypoints.every(wp => wp.generatedImageUrl);
     if (pathElements.generateVideoBtn) {
-        pathElements.generateVideoBtn.disabled = !allKeyframesGenerated || !hasApiKey || pathState.isGeneratingVideos;
+        pathElements.generateVideoBtn.disabled = !allKeyframesGenerated || pathState.isGeneratingVideos;
     }
-    
+
     if (pathElements.downloadAllBtn) {
         pathElements.downloadAllBtn.classList.toggle('hidden', !allKeyframesGenerated);
     }
@@ -2084,12 +2018,7 @@ function loadPathImageFromUrl(url) {
 
 // ===== Generate Keyframes =====
 async function generateKeyframes() {
-    const apiKey = elements.apiKey.value.trim();
-    addPathLog(`Generate keyframes clicked. waypoints=${pathState.waypoints.length}, hasApiKey=${apiKey.length > 0}, hasPathImage=${!!(pathState.imageUrl || pathState.uploadedImage)}`, 'info');
-    if (!apiKey) {
-        showPathStatus('Please enter your Mixio API key', 'error');
-        return;
-    }
+    addPathLog(`Generate keyframes clicked. waypoints=${pathState.waypoints.length}, hasPathImage=${!!(pathState.imageUrl || pathState.uploadedImage)}`, 'info');
 
     // If user uploaded only in Single Angle tab, auto-sync it now
     if (!pathState.imageUrl && !pathState.uploadedImage) {
@@ -2121,8 +2050,6 @@ async function generateKeyframes() {
     pathElements.keyframeProgressFill.style.width = '0%';
     pathElements.keyframeProgressText.textContent = `0/${pathState.waypoints.length}`;
     
-    fal.config({ credentials: apiKey });
-    
     let imageUrl;
     try {
         if (pathState.imageUrl) {
@@ -2130,7 +2057,7 @@ async function generateKeyframes() {
             pathState.sourceImageUrl = imageUrl;
         } else {
             addPathLog('Uploading source image...', 'request');
-            imageUrl = await fal.storage.upload(pathState.uploadedImage);
+            imageUrl = await uploadImageToBackend(pathState.uploadedImage);
             addPathLog(`Uploaded: ${imageUrl}`, 'response');
             pathState.sourceImageUrl = imageUrl;
         }
@@ -2154,18 +2081,19 @@ async function generateKeyframes() {
         addPathLog(`Generating keyframe ${i + 1}/${total}: Az=${wp.azimuth}°, El=${wp.elevation}°`, 'request');
         
         try {
-            const result = await fal.run(CONFIG.FAL_MODEL_ID, {
-                input: {
-                    image_urls: [imageUrl],
+            const result = await apiRequest('/api/generate-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    imageUrl,
                     horizontal_angle: wp.azimuth,
                     vertical_angle: wp.elevation,
                     zoom: wp.distance
-                }
+                })
             });
-            
-            const data = result.data || result;
-            const outputUrl = data?.images?.[0]?.url || result?.images?.[0]?.url;
-            
+
+            const outputUrl = result?.imageUrl;
+
             if (outputUrl) {
                 wp.generatedImageUrl = outputUrl;
                 completed++;
@@ -2592,68 +2520,60 @@ function drawImageZoomed(ctx, img, canvasW, canvasH, zoom, offsetX, offsetY) {
 // ===== Generate AI Video (Seedance) =====
 // Generates video for EACH consecutive keyframe pair, speeds up 4x, stitches together
 async function generateAIVideo() {
-    const apiKey = elements.apiKey.value.trim();
-    if (!apiKey) {
-        showPathStatus('Please enter your Mixio API key', 'error');
-        return;
-    }
-    
-    // Include source input image as FIRST frame, then generated keyframes
     const genKeyframes = pathState.waypoints.filter(wp => wp.generatedImageUrl);
     if (genKeyframes.length < 1) {
         showPathStatus('Need at least 1 generated keyframe (run Multi-image first)', 'error');
         return;
     }
+
     const sourceUrl = await ensurePathSourceImageUrl();
     if (!sourceUrl) {
         showPathStatus('Missing input image for video start frame. Go to Multi-image and upload an image first.', 'error');
         return;
     }
+
     const ref = genKeyframes[0];
     const keyframes = [{ ...ref, generatedImageUrl: sourceUrl, isSource: true }, ...genKeyframes];
     addPathLog(`AI video frames: source+${genKeyframes.length} keyframes = ${keyframes.length}`, 'info');
-    
+
     pathState.isGeneratingVideos = true;
     pathState.segmentVideos = [];
     updatePathButtons();
-    
+
     pathElements.generateVideoBtn.classList.add('generating');
     pathElements.generateVideoBtn.querySelector('.btn-text').textContent = 'Generating segments...';
     pathElements.generateVideoBtn.querySelector('.btn-loader').classList.remove('hidden');
     pathElements.videoProgress.classList.remove('hidden');
-    
+
     const prompt = pathElements.aiPrompt?.value || 'The camera very slowly and smoothly lowers on a boom. The subject moves barely moves, and is extremely deliberate and thoughtful in his movement.';
     const resolution = pathElements.aiResolution?.value || '720p';
     const modelKey = pathElements.aiVideoModel?.value || 'seedance';
-    const modelId = resolveAIVideoModelId(modelKey);
 
-    // Veo 3.1 Fast is first/last-frame-to-video: generate ONE video from first to last keyframe
-    // (no per-pair stitching workflow).
     if (modelKey === 'veo31') {
         const first = keyframes[0];
         const last = keyframes[keyframes.length - 1];
 
-        addPathLog(`AI video model: ${modelId}`, 'info');
-        addPathLog('Veo mode: generating one video from first→last keyframe (ignores loop/pair seconds).', 'info');
-
-        fal.config({ credentials: apiKey });
+        addPathLog(`AI video model: ${modelKey}`, 'info');
+        addPathLog('Veo mode: generating one video from first→last keyframe.', 'info');
 
         try {
-            const result = await fal.subscribe(modelId, {
-                input: {
+            const response = await apiRequest('/api/video/first-last', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    modelKey,
                     prompt,
                     first_frame_url: first.generatedImageUrl,
                     last_frame_url: last.generatedImageUrl
-                },
-                logs: false
+                })
             });
 
-            const videoUrl = result?.data?.video?.url || result?.video?.url;
+            const videoUrl = response?.videoUrl;
             if (!videoUrl) throw new Error('No video in response');
 
             pathState.generatedVideoUrl = videoUrl;
             pathState.generatedVideoBlob = null;
-            pathState.generatedVideoUrlMp4 = videoUrl; // Veo returns mp4
+            pathState.generatedVideoUrlMp4 = videoUrl;
             pathState.generatedVideoBlobMp4 = null;
 
             pathElements.finalVideo.src = videoUrl;
@@ -2663,22 +2583,26 @@ async function generateAIVideo() {
 
             showPathStatus('Veo video generated!', 'success');
             addPathLog(`Veo video ready: ${videoUrl.substring(0, 60)}...`, 'response');
-        } catch (e) {
-            showPathStatus(`Veo failed: ${formatError(e)}`, 'error');
-            addPathLog(`Veo error: ${formatError(e)}`, 'error');
+        } catch (err) {
+            showPathStatus(`Veo failed: ${formatError(err)}`, 'error');
+            addPathLog(`Veo error: ${formatError(err)}`, 'error');
         } finally {
-            pathState.isGeneratingVideos = false;
             resetVideoUI();
         }
 
         return;
     }
+
     const pairSeconds = parseFloat(pathElements.aiPairSeconds?.value || '1');
-    const seedanceSegmentSeconds = 4; // API minimum
+    const seedanceSegmentSeconds = 4;
     const speedMultiplier = seedanceSegmentSeconds / Math.max(0.5, pairSeconds);
     const loopPath = !!pathElements.aiLoopPath?.checked;
     const totalSegments = loopPath ? keyframes.length : (keyframes.length - 1);
+
+    addPathLog(`AI video model: ${modelKey}`, 'info');
     addPathLog(`Segments to generate: ${totalSegments} (loop=${loopPath}) | expected_duration≈${(totalSegments * pairSeconds).toFixed(1)}s`, 'info');
+    addPathLog(`Prompt: "${prompt}"`, 'info');
+
     const keyframeUrls = keyframes.map(k => k.generatedImageUrl);
     const cacheKey = buildSeedanceSegmentsCacheKey({
         keyframeUrls,
@@ -2686,64 +2610,51 @@ async function generateAIVideo() {
         resolution,
         seedanceSeconds: seedanceSegmentSeconds,
         loop: loopPath,
-        modelId
+        modelKey
     });
-    
-    fal.config({ credentials: apiKey });
-    
-    addPathLog(`AI video model: ${modelId}`, 'info');
-    addPathLog(`Generating ${totalSegments} segments (${seedanceSegmentSeconds}s each → ${pairSeconds}s after speedup, ${speedMultiplier.toFixed(2)}x)`, 'info');
-    addPathLog(`Prompt: "${prompt}"`, 'info');
-    
-    // Step 1: Use cached Seedance segment URLs if available (so we don’t re-queue every time)
+
     let segmentUrls = [];
     const cache = loadAICache();
     const cachedEntry = cache?.[cacheKey];
+
     if (cachedEntry?.segmentUrls?.length === totalSegments) {
         segmentUrls = cachedEntry.segmentUrls.slice(0);
         addPathLog(`Cache hit: reusing ${segmentUrls.length} Seedance segments (no model calls).`, 'info');
         pathElements.videoProgressFill.style.width = '20%';
         pathElements.videoProgressText.textContent = 'Using cached segments...';
     } else {
-        // Generate all Seedance segments
         for (let i = 0; i < totalSegments; i++) {
             const startFrame = keyframes[i];
             const endFrame = keyframes[(i + 1) % keyframes.length];
-            
+            const endLabel = (i + 1) < keyframes.length ? (i + 2) : 1;
+
             pathElements.videoProgressFill.style.width = `${((i + 0.5) / totalSegments) * 70}%`;
             pathElements.videoProgressText.textContent = `Segment ${i + 1}/${totalSegments}`;
-            
-            const endLabel = (i + 1) < keyframes.length ? (i + 2) : 1;
             addPathLog(`Segment ${i + 1}: Frame ${i + 1} (Az=${startFrame.azimuth}°) → Frame ${endLabel} (Az=${endFrame.azimuth}°)`, 'request');
-            
+
             try {
-                // LTX-2 image-to-video does not support end frame in its schema (image_url only).
-                // We keep it in the dropdown for future workflows, but block pair-based generation for now.
                 if (modelKey === 'ltx2') {
                     throw new Error('LTX-2 image-to-video does not support start+end frame pairs. Choose Seedance or Kling 2.6 for keyframe-to-keyframe motion.');
                 }
 
-                const result = await fal.subscribe(modelId, {
-                    input: {
-                        prompt: prompt,
-                        image_url: startFrame.generatedImageUrl,
-                        end_image_url: endFrame.generatedImageUrl,
-                        duration: String(seedanceSegmentSeconds), // API minimum; we speed up in stitching
-                        resolution: resolution,
-                        camera_fixed: false,
-                        generate_audio: false
-                    },
-                    logs: false,
-                    onQueueUpdate: (update) => {
-                        if (update.status === 'IN_QUEUE') {
-                            pathElements.videoProgressText.textContent = `Segment ${i + 1}/${totalSegments} (queued)`;
-                        } else if (update.status === 'IN_PROGRESS') {
-                            pathElements.videoProgressText.textContent = `Segment ${i + 1}/${totalSegments} (rendering)`;
-                        }
-                    }
+                const body = {
+                    modelKey,
+                    prompt,
+                    image_url: startFrame.generatedImageUrl,
+                    end_image_url: endFrame.generatedImageUrl,
+                    duration: String(seedanceSegmentSeconds),
+                    resolution,
+                    camera_fixed: false,
+                    generate_audio: false
+                };
+
+                const response = await apiRequest('/api/video/segment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
                 });
-                
-                const videoUrl = result?.data?.video?.url || result?.video?.url;
+
+                const videoUrl = response?.videoUrl;
                 if (videoUrl) {
                     segmentUrls.push(videoUrl);
                     addPathLog(`Segment ${i + 1} done!`, 'response');
@@ -2755,28 +2666,25 @@ async function generateAIVideo() {
             }
         }
 
-        // Save cache only if complete
         if (segmentUrls.length === totalSegments) {
             const nextCache = loadAICache();
             nextCache[cacheKey] = { createdAt: Date.now(), segmentUrls };
             saveAICache(pruneAICache(nextCache));
-            addPathLog('Saved Seedance segments to cache. Next run can skip the queue.', 'info');
+            addPathLog('Saved AI segments to cache. Next run can skip the queue.', 'info');
         }
     }
-    
+
     if (segmentUrls.length === 0) {
         showPathStatus('No segments generated', 'error');
         resetVideoUI();
         return;
     }
-    
-    // Step 2: Download, speed up 4x, and stitch
+
     pathElements.videoProgressFill.style.width = '75%';
     pathElements.videoProgressText.textContent = 'Downloading segments...';
     addPathLog(`Downloading ${segmentUrls.length} segments for stitching...`, 'info');
-    
+
     try {
-        // Download all video blobs
         const videoBlobs = [];
         for (let i = 0; i < segmentUrls.length; i++) {
             const response = await fetch(segmentUrls[i]);
@@ -2784,31 +2692,29 @@ async function generateAIVideo() {
             videoBlobs.push(blob);
             addPathLog(`Downloaded segment ${i + 1}`, 'info');
         }
-        
-        pathElements.videoProgressText.textContent = 'Stitching with 4x speedup...';
+
+        pathElements.videoProgressText.textContent = 'Stitching with speedup...';
         pathElements.videoProgressFill.style.width = '85%';
-        
-        // Stitch with speedup (playback-rate stitching to avoid stretched durations)
+
         const finalBlob = await stitchAndSpeedupVideos(videoBlobs, speedMultiplier, pairSeconds);
-        
+
         pathState.generatedVideoBlob = finalBlob;
         pathState.generatedVideoUrl = URL.createObjectURL(finalBlob);
         pathState.generatedVideoUrlMp4 = null;
         pathState.generatedVideoBlobMp4 = null;
-        
+
         pathElements.finalVideo.src = pathState.generatedVideoUrl;
         pathElements.finalVideo.classList.remove('hidden');
         pathElements.videoEmptyState.classList.add('hidden');
         pathElements.downloadVideoBtn.classList.remove('hidden');
-        
+
         pathElements.videoProgressFill.style.width = '100%';
         pathElements.videoProgressText.textContent = 'Complete!';
-        
+
         const finalDuration = segmentUrls.length * pairSeconds;
         showPathStatus(`Done! ${finalDuration} second video`, 'success');
         addPathLog(`Final video: ~${finalDuration} seconds (${segmentUrls.length} segments × ${pairSeconds}s)`, 'response');
 
-        // Also produce an MP4 (best compatibility)
         try {
             showPathStatus('Transcoding to MP4...', 'info');
             const mp4Blob = await transcodeWebmToMp4(finalBlob, 'AI');
@@ -2820,12 +2726,10 @@ async function generateAIVideo() {
         } catch (e) {
             addPathLog(`AI: MP4 transcoding failed, keeping WebM. ${formatError(e)}`, 'warn');
         }
-        
     } catch (err) {
         addPathLog(`Stitch error: ${formatError(err)}`, 'error');
         showPathStatus('Stitching failed - showing segments', 'warn');
-        
-        // Fallback: show first segment
+
         if (segmentUrls.length > 0) {
             pathState.generatedVideoUrl = segmentUrls[0];
             pathElements.finalVideo.src = segmentUrls[0];
@@ -2834,7 +2738,7 @@ async function generateAIVideo() {
             pathElements.downloadVideoBtn.classList.remove('hidden');
         }
     }
-    
+
     resetVideoUI();
 }
 
@@ -3135,15 +3039,11 @@ function setupPathEventListeners() {
         }
     });
     
-    // API key changes should update path buttons too
-    elements.apiKey?.addEventListener('input', updatePathButtons);
 }
 
 // ===== Initialize =====
 function init() {
     // Cache DOM elements - Single Angle Tab
-    elements.apiKey = document.getElementById('api-key');
-    elements.toggleKey = document.getElementById('toggle-key');
     elements.uploadZone = document.getElementById('upload-zone');
     elements.imageInput = document.getElementById('image-input');
     elements.uploadPlaceholder = document.getElementById('upload-placeholder');
@@ -3226,18 +3126,6 @@ function init() {
     updatePathButtons();
     updateGallery();
     
-    // Try to load API key from localStorage
-    const savedKey = localStorage.getItem('fal_api_key');
-    if (savedKey) {
-        elements.apiKey.value = savedKey;
-        updateGenerateButton();
-        updatePathButtons();
-    }
-    
-    // Save API key on change
-    elements.apiKey.addEventListener('change', () => {
-        localStorage.setItem('fal_api_key', elements.apiKey.value);
-    });
 }
 
 // Start when DOM is ready
