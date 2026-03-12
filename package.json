@@ -1,7 +1,7 @@
 {
   "name": "qwen-multiangle",
   "version": "1.0.0",
-  "description": "3D camera control for Qwen Image Edit Multi-Angles LoRA via fal.ai API",
+  "description": "3D camera control for Qwen Image Edit Multi-Angles LoRA via Mixio API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,7 +11,7 @@
     "qwen",
     "image-editing",
     "threejs",
-    "fal-ai",
+    "mixio",
     "camera-control"
   ],
   "author": "",

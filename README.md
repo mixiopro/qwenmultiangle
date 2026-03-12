@@ -1,6 +1,6 @@
-# Qwen Multi-Angle Camera Control
+# Mixio Multi-Angle Camera Control
 
-A small web app that lets you adjust a virtual camera (azimuth, elevation, zoom) and generate alternate views of an image using fal.ai’s Qwen Image Edit “multiple angles” model.
+A small web app that lets you adjust a virtual camera (azimuth, elevation, zoom) and generate alternate views of an image using Mixio’s Qwen Image Edit “multiple angles” model.
 
 ## Screenshot
 
@@ -17,14 +17,14 @@ A small web app that lets you adjust a virtual camera (azimuth, elevation, zoom)
 
 Inspired by [multimodalart/qwen-image-multiple-angles-3d-camera](https://huggingface.co/spaces/multimodalart/qwen-image-multiple-angles-3d-camera) on Hugging Face Spaces.
 
-Powered by [fal.ai - Qwen Image Edit 2511 Multiple Angles](https://fal.ai/models/fal-ai/qwen-image-edit-2511-multiple-angles/)
+Powered by Mixio
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
-- A fal.ai API key ([create one](https://fal.ai/dashboard/keys))
+- A Mixio API key
 
 ### Local Development
 
@@ -33,7 +33,7 @@ npm install
 npm start
 ```
 
-Then open `http://localhost:3000` and paste your fal.ai API key into the header input.
+Then open `http://localhost:3000` and paste your Mixio API key into the header input.
 
 ## Project Structure
 
@@ -41,7 +41,7 @@ Then open `http://localhost:3000` and paste your fal.ai API key into the header 
 qwenmultiangle/
 ├── index.html      # Main HTML structure
 ├── style.css       # Modern dark theme styling
-├── app.js          # Three.js scene + fal.ai API integration
+├── app.js          # Three.js scene + API integration
 ├── server.js       # Express server for static file serving
 ├── package.json    # Node.js dependencies
 └── README.md       # This file

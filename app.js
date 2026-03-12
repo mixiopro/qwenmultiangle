@@ -1138,7 +1138,7 @@ function loadImageFromUrl(url) {
 async function generateImage() {
     const apiKey = elements.apiKey.value.trim();
     if (!apiKey) {
-        showStatus('Please enter your fal.ai API key', 'error');
+        showStatus('Please enter your Mixio API key', 'error');
         addLog('Error: No API key provided', 'error');
         return;
     }
@@ -1183,7 +1183,7 @@ async function generateImage() {
         credentials: apiKey
     });
     
-    addLog(`Configuring fal client...`, 'info');
+    addLog(`Configuring API client...`, 'info');
     addLog(`Model: ${CONFIG.FAL_MODEL_ID}`, 'info');
     addLog(`Camera: horizontal_angle=${state.azimuth}°, vertical_angle=${state.elevation}°, zoom=${state.distance}`, 'info');
     
@@ -1197,7 +1197,7 @@ async function generateImage() {
         } else {
             // Upload the image to fal storage
             showStatus('Uploading image...', 'info');
-            addLog(`Uploading image to fal storage...`, 'request');
+            addLog(`Uploading image to storage...`, 'request');
             
             imageUrl = await fal.storage.upload(state.uploadedImage);
             addLog(`Image uploaded: ${imageUrl}`, 'response');
@@ -1291,7 +1291,7 @@ async function generateImage() {
         if (error.message && error.message.includes('fetch')) {
             errorMsg = 'Network error - check your internet connection';
         } else if (error.status === 401 || error.message?.includes('401')) {
-            errorMsg = 'Invalid API key. Please check your fal.ai API key.';
+            errorMsg = 'Invalid API key. Please check your Mixio API key.';
         } else if (error.status === 422 || error.message?.includes('422')) {
             errorMsg = 'Invalid request format. Check the logs for details.';
         } else if (error.body) {
@@ -2087,7 +2087,7 @@ async function generateKeyframes() {
     const apiKey = elements.apiKey.value.trim();
     addPathLog(`Generate keyframes clicked. waypoints=${pathState.waypoints.length}, hasApiKey=${apiKey.length > 0}, hasPathImage=${!!(pathState.imageUrl || pathState.uploadedImage)}`, 'info');
     if (!apiKey) {
-        showPathStatus('Please enter your fal.ai API key', 'error');
+        showPathStatus('Please enter your Mixio API key', 'error');
         return;
     }
 
@@ -2594,7 +2594,7 @@ function drawImageZoomed(ctx, img, canvasW, canvasH, zoom, offsetX, offsetY) {
 async function generateAIVideo() {
     const apiKey = elements.apiKey.value.trim();
     if (!apiKey) {
-        showPathStatus('Please enter your fal.ai API key', 'error');
+        showPathStatus('Please enter your Mixio API key', 'error');
         return;
     }
     
