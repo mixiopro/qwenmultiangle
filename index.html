@@ -56,7 +56,7 @@
                         <!-- Image Upload -->
                         <div class="panel-card upload-card">
                             <h3 class="card-title">Input Image</h3>
-                            <div class="upload-zone" id="upload-zone">
+                            <label class="upload-zone" id="upload-zone" for="image-input">
                                 <input type="file" id="image-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" hidden>
                                 <div class="upload-placeholder" id="upload-placeholder">
                                     <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -67,8 +67,8 @@
                                     <p>Drop image here or click to upload</p>
                                 </div>
                                 <img id="preview-image" class="preview-image hidden" alt="Preview">
-                                <button id="clear-image" class="clear-btn hidden">×</button>
-                            </div>
+                                <button id="clear-image" class="clear-btn hidden" type="button">×</button>
+                            </label>
                             <div class="url-input-section">
                                 <div class="url-divider"><span>or paste URL</span></div>
                                 <div class="url-input-wrapper">
@@ -200,7 +200,7 @@
                         <!-- Image Upload for Path -->
                         <div class="panel-card upload-card">
                             <h3 class="card-title">Input Image</h3>
-                            <div class="upload-zone" id="path-upload-zone">
+                            <label class="upload-zone" id="path-upload-zone" for="path-image-input">
                                 <input type="file" id="path-image-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" hidden>
                                 <div class="upload-placeholder" id="path-upload-placeholder">
                                     <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -211,8 +211,8 @@
                                     <p>Drop image here or click to upload</p>
                                 </div>
                                 <img id="path-preview-image" class="preview-image hidden" alt="Preview">
-                                <button id="path-clear-image" class="clear-btn hidden">×</button>
-                            </div>
+                                <button id="path-clear-image" class="clear-btn hidden" type="button">×</button>
+                            </label>
                             <div class="url-input-section">
                                 <div class="url-divider"><span>or paste URL</span></div>
                                 <div class="url-input-wrapper">
