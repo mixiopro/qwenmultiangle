@@ -37,6 +37,14 @@
                 </svg>
                 Multi-image
             </button>
+            <button class="tab-btn" data-tab="next-scene">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 12h12"/>
+                    <path d="M12 6l6 6-6 6"/>
+                    <path d="M20 5v14"/>
+                </svg>
+                Next-Scene
+            </button>
             <button class="tab-btn" data-tab="camera-motion" style="display: none;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 7l-9 5-9-5 9-5 9 5z"/>
@@ -311,6 +319,101 @@
                             </summary>
                             <div id="path-logs-container" class="logs-container">
                                 <div class="log-entry info">Camera Path mode ready. Add waypoints to begin.</div>
+                            </div>
+                        </details>
+                    </section>
+                </main>
+            </div>
+
+            <!-- ========== NEXT SCENE TAB ========== -->
+            <div class="tab-panel" id="next-scene-panel">
+                <main class="main-content">
+                    <section class="left-panel">
+                        <div class="panel-card upload-card">
+                            <h3 class="card-title">Input Image</h3>
+                            <label class="upload-zone" id="next-scene-upload-zone" for="next-scene-image-input">
+                                <input type="file" id="next-scene-image-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" hidden>
+                                <div class="upload-placeholder" id="next-scene-upload-placeholder">
+                                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    <p>Drop image here or click to upload</p>
+                                </div>
+                                <img id="next-scene-preview-image" class="preview-image hidden" alt="Next scene preview">
+                                <button id="next-scene-clear-image" class="clear-btn hidden" type="button">×</button>
+                            </label>
+                            <div class="url-input-section">
+                                <div class="url-divider"><span>or paste URL</span></div>
+                                <div class="url-input-wrapper">
+                                    <input type="text" id="next-scene-image-url-input" placeholder="https://example.com/image.jpg" autocomplete="off">
+                                    <button id="next-scene-load-url-btn" class="load-url-btn">Load</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel-card">
+                            <h3 class="card-title">Next-Scene Prompt</h3>
+                            <p class="card-subtitle">Prompts are sent as <strong>Next Scene:</strong> Describe the camera or scene changes you want.</p>
+                            <div class="setting-group">
+                                <label for="next-scene-prompt">Scene Change Prompt</label>
+                                <textarea id="next-scene-prompt" rows="4" placeholder="The camera pulls back to reveal a wider view of the city as neon reflections flicker across the wet street."></textarea>
+                            </div>
+                            <div class="setting-group">
+                                <label for="next-scene-lora-scale">LoRA Strength</label>
+                                <select id="next-scene-lora-scale">
+                                    <option value="0.7">0.7</option>
+                                    <option value="0.75" selected>0.75 (Recommended)</option>
+                                    <option value="0.8">0.8</option>
+                                </select>
+                                <p class="setting-help">Recommended range: 0.7–0.8</p>
+                            </div>
+                        </div>
+
+                        <button id="next-scene-generate-btn" class="generate-btn" disabled>
+                            <span class="btn-text">Generate Next Scene</span>
+                            <span class="btn-loader hidden">
+                                <svg class="spinner" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4" stroke-dashoffset="10"/>
+                                </svg>
+                            </span>
+                        </button>
+                    </section>
+
+                    <section class="right-panel">
+                        <div class="panel-card output-card">
+                            <h3 class="card-title">Output</h3>
+                            <div class="output-container" id="next-scene-output-container">
+                                <div class="output-placeholder" id="next-scene-output-placeholder">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                                        <polyline points="21 15 16 10 5 21"/>
+                                    </svg>
+                                    <p>Generated next scene will appear here</p>
+                                </div>
+                                <img id="next-scene-output-image" class="output-image hidden" alt="Next scene output">
+                            </div>
+                            <button id="next-scene-download-btn" class="download-btn hidden">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Download
+                            </button>
+                        </div>
+
+                        <div id="next-scene-status-message" class="status-message hidden"></div>
+
+                        <details class="logs-panel" open>
+                            <summary class="logs-header">
+                                <span>🔧 Debug Logs</span>
+                                <button id="next-scene-clear-logs" class="clear-logs-btn">Clear</button>
+                            </summary>
+                            <div id="next-scene-logs-container" class="logs-container">
+                                <div class="log-entry info">Next-Scene mode ready. Add an image and describe the scene change.</div>
                             </div>
                         </details>
                     </section>

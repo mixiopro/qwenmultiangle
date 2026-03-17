@@ -48,9 +48,19 @@ let pathState = {
     videoMode: 'quick'       // 'quick' or 'ai'
 };
 
+// ===== Next Scene State =====
+let nextSceneState = {
+    uploadedImage: null,
+    uploadedImageBase64: null,
+    imageUrl: null,
+    sourceImageUrl: null,
+    isGenerating: false
+};
+
 // ===== DOM Elements =====
 const elements = {};
 const pathElements = {};
+const nextSceneElements = {};
 
 // ===== Seedance Segment Cache (localStorage) =====
 const AI_SEGMENTS_CACHE_KEY = 'qwenmultiangle_ai_segments_cache_v1';
@@ -224,11 +234,19 @@ function updateGenerateButton() {
     elements.generateBtn.disabled = !hasImage || state.isGenerating;
 }
 
+function updateNextSceneButton() {
+    const hasImage = nextSceneState.uploadedImage !== null || nextSceneState.imageUrl !== null;
+    const hasPrompt = !!nextSceneElements.prompt?.value?.trim();
+    if (nextSceneElements.generateBtn) {
+        nextSceneElements.generateBtn.disabled = !hasImage || !hasPrompt || nextSceneState.isGenerating;
+    }
+}
+
 function showStatus(message, type = 'info') {
     elements.statusMessage.textContent = message;
     elements.statusMessage.className = `status-message ${type}`;
     elements.statusMessage.classList.remove('hidden');
-    
+
     if (type === 'success') {
         setTimeout(() => {
             elements.statusMessage.classList.add('hidden');
@@ -238,6 +256,21 @@ function showStatus(message, type = 'info') {
 
 function hideStatus() {
     elements.statusMessage.classList.add('hidden');
+}
+
+function showNextSceneStatus(message, type = 'info') {
+    const el = nextSceneElements.statusMessage;
+    if (!el) return;
+    el.textContent = message;
+    el.className = `status-message ${type}`;
+    el.classList.remove('hidden');
+    if (type === 'success') {
+        setTimeout(() => el.classList.add('hidden'), 5000);
+    }
+}
+
+function hideNextSceneStatus() {
+    nextSceneElements.statusMessage?.classList.add('hidden');
 }
 
 // ===== Logging System =====
@@ -278,6 +311,38 @@ function addLog(message, type = 'info') {
 function clearLogs() {
     if (elements.logsContainer) {
         elements.logsContainer.innerHTML = '<div class="log-entry info">Logs cleared.</div>';
+    }
+}
+
+function addNextSceneLog(message, type = 'info') {
+    const container = nextSceneElements.logsContainer;
+    if (!container) return;
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+
+    const timestamp = document.createElement('span');
+    timestamp.className = 'log-timestamp';
+    timestamp.textContent = `[${getTimestamp()}]`;
+    entry.appendChild(timestamp);
+
+    let messageText = message;
+    if (typeof message === 'object') {
+        try {
+            messageText = JSON.stringify(message, null, 2);
+        } catch (e) {
+            messageText = String(message);
+        }
+    }
+
+    entry.appendChild(document.createTextNode(messageText));
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearNextSceneLogs() {
+    if (nextSceneElements.logsContainer) {
+        nextSceneElements.logsContainer.innerHTML = '<div class="log-entry info">Logs cleared.</div>';
     }
 }
 
@@ -1060,23 +1125,23 @@ function loadImageFromUrl(url) {
         addLog(`Error: ${validation.error}`, 'error');
         return;
     }
-    
+
     url = url.trim();
-    
+
     if (validation.warning) {
         addLog(`Warning: ${validation.warning}`, 'warn');
     }
-    
+
     addLog(`Loading image from URL: ${url}`, 'info');
     showStatus('Loading image...', 'info');
-    
+
     // Clear any previously uploaded file
     state.uploadedImage = null;
     state.uploadedImageBase64 = null;
-    
+
     // Set the URL
     state.imageUrl = url;
-    
+
     // Show URL indicator immediately
     elements.uploadPlaceholder.innerHTML = `
         <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -1089,20 +1154,20 @@ function loadImageFromUrl(url) {
     elements.clearImage.classList.remove('hidden');
     elements.uploadZone.classList.add('has-image');
     updateGenerateButton();
-    
+
     // Try to load the image for preview (without crossOrigin first for better compatibility)
     const img = new Image();
-    
+
     img.onload = () => {
         // Successfully loaded - show preview
         elements.previewImage.src = url;
         elements.previewImage.classList.remove('hidden');
         elements.uploadPlaceholder.classList.add('hidden');
-        
+
         addLog(`Image preview loaded successfully`, 'info');
         hideStatus();
     };
-    
+
     img.onerror = () => {
         // Preview failed but URL is still set - show indicator
         addLog(`Could not preview image (CORS/network), but URL is set for generation`, 'warn');
@@ -1110,13 +1175,125 @@ function loadImageFromUrl(url) {
         elements.uploadPlaceholder.classList.remove('hidden');
         hideStatus();
     };
-    
+
     img.src = url;
-    
+
     // Update 3D scene separately (it handles its own CORS)
     if (threeScene) {
         threeScene.updateImage(url);
     }
+}
+
+function handleNextSceneImageUpload(file) {
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+        showNextSceneStatus(validation.error, 'error');
+        addNextSceneLog(`Error: ${validation.error}`, 'error');
+        return;
+    }
+
+    addNextSceneLog(`Uploading image: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${file.type})`, 'info');
+
+    nextSceneState.imageUrl = null;
+    nextSceneState.sourceImageUrl = null;
+    if (nextSceneElements.imageUrlInput) {
+        nextSceneElements.imageUrlInput.value = '';
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        nextSceneState.uploadedImage = file;
+        nextSceneState.uploadedImageBase64 = e.target.result;
+
+        nextSceneElements.previewImage.src = e.target.result;
+        nextSceneElements.previewImage.classList.remove('hidden');
+        nextSceneElements.uploadPlaceholder.classList.add('hidden');
+        nextSceneElements.clearImage.classList.remove('hidden');
+        nextSceneElements.uploadZone.classList.add('has-image');
+
+        addNextSceneLog(`Image loaded successfully. Base64 size: ${(e.target.result.length / 1024).toFixed(1)} KB`, 'info');
+        updateNextSceneButton();
+        hideNextSceneStatus();
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearNextSceneImage() {
+    nextSceneState.uploadedImage = null;
+    nextSceneState.uploadedImageBase64 = null;
+    nextSceneState.imageUrl = null;
+    nextSceneState.sourceImageUrl = null;
+
+    nextSceneElements.previewImage.src = '';
+    nextSceneElements.previewImage.classList.add('hidden');
+    nextSceneElements.uploadPlaceholder.classList.remove('hidden');
+    nextSceneElements.clearImage.classList.add('hidden');
+    nextSceneElements.uploadZone.classList.remove('has-image');
+    nextSceneElements.imageUrlInput.value = '';
+
+    nextSceneElements.uploadPlaceholder.innerHTML = `
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p>Drop image here or click to upload</p>
+    `;
+
+    updateNextSceneButton();
+}
+
+function loadNextSceneImageFromUrl(url) {
+    const validation = validateImageUrl(url);
+    if (!validation.valid) {
+        showNextSceneStatus(validation.error, 'error');
+        addNextSceneLog(`Error: ${validation.error}`, 'error');
+        return;
+    }
+
+    url = url.trim();
+
+    if (validation.warning) {
+        addNextSceneLog(`Warning: ${validation.warning}`, 'warn');
+    }
+
+    addNextSceneLog(`Loading image from URL: ${url}`, 'info');
+    showNextSceneStatus('Loading image...', 'info');
+
+    nextSceneState.uploadedImage = null;
+    nextSceneState.uploadedImageBase64 = null;
+    nextSceneState.imageUrl = url;
+    nextSceneState.sourceImageUrl = url;
+
+    nextSceneElements.uploadPlaceholder.innerHTML = `
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <p style="font-size: 11px; word-break: break-all; color: var(--accent);">URL loaded</p>
+        <p style="font-size: 10px; word-break: break-all; opacity: 0.6;">${url.length > 40 ? url.substring(0, 40) + '...' : url}</p>
+    `;
+    nextSceneElements.clearImage.classList.remove('hidden');
+    nextSceneElements.uploadZone.classList.add('has-image');
+    updateNextSceneButton();
+
+    const img = new Image();
+    img.onload = () => {
+        nextSceneElements.previewImage.src = url;
+        nextSceneElements.previewImage.classList.remove('hidden');
+        nextSceneElements.uploadPlaceholder.classList.add('hidden');
+        addNextSceneLog('Image preview loaded successfully', 'info');
+        hideNextSceneStatus();
+    };
+
+    img.onerror = () => {
+        addNextSceneLog('Could not preview image (CORS/network), but URL is set for generation', 'warn');
+        nextSceneElements.previewImage.classList.add('hidden');
+        nextSceneElements.uploadPlaceholder.classList.remove('hidden');
+        hideNextSceneStatus();
+    };
+
+    img.src = url;
 }
 
 // ===== Backend API Helpers =====
@@ -1266,12 +1443,12 @@ async function generateImage() {
 async function downloadImage() {
     const imageUrl = elements.outputImage.src;
     if (!imageUrl) return;
-    
+
     try {
         const response = await fetch(imageUrl);
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
-        
+
         const a = document.createElement('a');
         a.href = url;
         a.download = `qwen-multiangle-${Date.now()}.png`;
@@ -1285,29 +1462,140 @@ async function downloadImage() {
     }
 }
 
+async function generateNextScene() {
+    if (!nextSceneState.uploadedImage && !nextSceneState.imageUrl) {
+        showNextSceneStatus('Please upload an image or provide a URL', 'error');
+        addNextSceneLog('Error: No image provided', 'error');
+        return;
+    }
+
+    const prompt = nextSceneElements.prompt?.value?.trim() || '';
+    if (!prompt) {
+        showNextSceneStatus('Please describe the next scene', 'error');
+        addNextSceneLog('Error: No prompt provided', 'error');
+        return;
+    }
+
+    nextSceneState.isGenerating = true;
+    updateNextSceneButton();
+
+    nextSceneElements.generateBtn.classList.add('generating');
+    nextSceneElements.generateBtn.querySelector('.btn-text').textContent = 'Generating...';
+    nextSceneElements.generateBtn.querySelector('.btn-loader').classList.remove('hidden');
+    nextSceneElements.outputContainer.classList.add('loading');
+    nextSceneElements.outputPlaceholder.classList.add('loading');
+
+    hideNextSceneStatus();
+    addNextSceneLog('Calling backend next-scene API...', 'info');
+    addNextSceneLog(`Prompt preview: Next Scene: ${prompt}`, 'info');
+    addNextSceneLog(`LoRA scale: ${nextSceneElements.loraScale?.value || '0.75'}`, 'info');
+
+    try {
+        let imageUrl = nextSceneState.imageUrl;
+
+        if (!imageUrl) {
+            showNextSceneStatus('Uploading image...', 'info');
+            addNextSceneLog('Uploading image via backend...', 'request');
+            imageUrl = await uploadImageToBackend(nextSceneState.uploadedImage);
+            nextSceneState.sourceImageUrl = imageUrl;
+            addNextSceneLog(`Image uploaded: ${imageUrl}`, 'response');
+        } else {
+            nextSceneState.sourceImageUrl = imageUrl;
+            addNextSceneLog(`Using provided URL: ${imageUrl}`, 'info');
+        }
+
+        showNextSceneStatus('Generating next scene... This may take a moment.', 'info');
+
+        const result = await apiRequest('/api/generate-next-scene', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                imageUrl,
+                prompt,
+                loraScale: nextSceneElements.loraScale?.value || '0.75'
+            })
+        });
+
+        const outputImageUrl = result?.imageUrl;
+        if (!outputImageUrl) {
+            addNextSceneLog('Error: Could not extract image URL from response', 'error');
+            throw new Error('No image in response. Check logs for details.');
+        }
+
+        nextSceneElements.outputImage.src = outputImageUrl;
+        nextSceneElements.outputImage.classList.remove('hidden');
+        nextSceneElements.outputPlaceholder.classList.add('hidden');
+        nextSceneElements.downloadBtn.classList.remove('hidden');
+        nextSceneElements.outputContainer.classList.add('success');
+        setTimeout(() => {
+            nextSceneElements.outputContainer.classList.remove('success');
+        }, 600);
+
+        addNextSceneLog(`Success! Image URL: ${outputImageUrl.substring(0, 80)}...`, 'info');
+        showNextSceneStatus('Next scene generated successfully!', 'success');
+    } catch (error) {
+        console.error('Next-scene generation error:', error);
+        const errorMsg = formatError(error?.body || error);
+        addNextSceneLog(`Error: ${errorMsg}`, 'error');
+        if (error?.body && typeof error.body === 'object') {
+            addNextSceneLog(`Error body: ${JSON.stringify(error.body, null, 2)}`, 'error');
+        }
+        showNextSceneStatus(`Error: ${errorMsg}`, 'error');
+    } finally {
+        nextSceneState.isGenerating = false;
+        updateNextSceneButton();
+        nextSceneElements.generateBtn.classList.remove('generating');
+        nextSceneElements.generateBtn.querySelector('.btn-text').textContent = 'Generate Next Scene';
+        nextSceneElements.generateBtn.querySelector('.btn-loader').classList.add('hidden');
+        nextSceneElements.outputContainer.classList.remove('loading');
+        nextSceneElements.outputPlaceholder.classList.remove('loading');
+    }
+}
+
+async function downloadNextSceneImage() {
+    const imageUrl = nextSceneElements.outputImage.src;
+    if (!imageUrl) return;
+
+    try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mixio-next-scene-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        window.open(imageUrl, '_blank');
+    }
+}
+
 // ===== Event Listeners Setup =====
 function setupEventListeners() {
     // Image upload - click
     elements.uploadZone.addEventListener('click', () => {
         elements.imageInput.click();
     });
-    
+
     elements.imageInput.addEventListener('change', (e) => {
         if (e.target.files && e.target.files[0]) {
             handleImageUpload(e.target.files[0]);
         }
     });
-    
+
     // Image upload - drag and drop
     elements.uploadZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         elements.uploadZone.classList.add('drag-over');
     });
-    
+
     elements.uploadZone.addEventListener('dragleave', () => {
         elements.uploadZone.classList.remove('drag-over');
     });
-    
+
     elements.uploadZone.addEventListener('drop', (e) => {
         e.preventDefault();
         elements.uploadZone.classList.remove('drag-over');
@@ -1315,25 +1603,25 @@ function setupEventListeners() {
             handleImageUpload(e.dataTransfer.files[0]);
         }
     });
-    
+
     // Clear image
     elements.clearImage.addEventListener('click', (e) => {
         e.stopPropagation();
         clearImage();
     });
-    
+
     // URL input - load button
     elements.loadUrlBtn.addEventListener('click', () => {
         loadImageFromUrl(elements.imageUrlInput.value);
     });
-    
+
     // URL input - enter key
     elements.imageUrlInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             loadImageFromUrl(elements.imageUrlInput.value);
         }
     });
-    
+
     // Sliders - continuous values matching fal.ai ranges
     // horizontal_angle: 0-360, vertical_angle: -30 to 90, zoom: 0-10
     elements.azimuthSlider.addEventListener('input', (e) => {
@@ -1342,27 +1630,27 @@ function setupEventListeners() {
         updatePromptDisplay();
         if (threeScene) threeScene.syncFromSliders();
     });
-    
+
     elements.elevationSlider.addEventListener('input', (e) => {
         state.elevation = parseFloat(e.target.value);
         updateSliderValues();
         updatePromptDisplay();
         if (threeScene) threeScene.syncFromSliders();
     });
-    
+
     elements.distanceSlider.addEventListener('input', (e) => {
         state.distance = parseFloat(e.target.value);
         updateSliderValues();
         updatePromptDisplay();
         if (threeScene) threeScene.syncFromSliders();
     });
-    
+
     // Generate button
     elements.generateBtn.addEventListener('click', generateImage);
-    
+
     // Download button
     elements.downloadBtn.addEventListener('click', downloadImage);
-    
+
     // Clear logs button
     if (elements.clearLogs) {
         elements.clearLogs.addEventListener('click', (e) => {
@@ -1373,19 +1661,71 @@ function setupEventListeners() {
     }
 }
 
+function setupNextSceneEventListeners() {
+    nextSceneElements.uploadZone?.addEventListener('click', () => nextSceneElements.imageInput.click());
+
+    nextSceneElements.imageInput?.addEventListener('change', (e) => {
+        if (e.target.files?.[0]) {
+            handleNextSceneImageUpload(e.target.files[0]);
+        }
+    });
+
+    nextSceneElements.uploadZone?.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        nextSceneElements.uploadZone.classList.add('drag-over');
+    });
+
+    nextSceneElements.uploadZone?.addEventListener('dragleave', () => {
+        nextSceneElements.uploadZone.classList.remove('drag-over');
+    });
+
+    nextSceneElements.uploadZone?.addEventListener('drop', (e) => {
+        e.preventDefault();
+        nextSceneElements.uploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files?.[0]) {
+            handleNextSceneImageUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    nextSceneElements.clearImage?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearNextSceneImage();
+    });
+
+    nextSceneElements.loadUrlBtn?.addEventListener('click', () => {
+        loadNextSceneImageFromUrl(nextSceneElements.imageUrlInput.value);
+    });
+
+    nextSceneElements.imageUrlInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            loadNextSceneImageFromUrl(nextSceneElements.imageUrlInput.value);
+        }
+    });
+
+    nextSceneElements.prompt?.addEventListener('input', updateNextSceneButton);
+    nextSceneElements.loraScale?.addEventListener('change', updateNextSceneButton);
+    nextSceneElements.generateBtn?.addEventListener('click', generateNextScene);
+    nextSceneElements.downloadBtn?.addEventListener('click', downloadNextSceneImage);
+    nextSceneElements.clearLogsBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearNextSceneLogs();
+    });
+}
+
 // ===== Tab Switching =====
 function setupTabSwitching() {
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabPanels = document.querySelectorAll('.tab-panel');
-    
+
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const targetTab = btn.dataset.tab;
-            
+
             // Update buttons
             tabBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            
+
             // Update panels
             tabPanels.forEach(panel => {
                 panel.classList.remove('active');
@@ -1393,7 +1733,7 @@ function setupTabSwitching() {
                     panel.classList.add('active');
                 }
             });
-            
+
             // Initialize multi-image scene when switching to multi-image tab
             if (targetTab === 'multi-image' && !pathThreeScene) {
                 setTimeout(() => initPathThreeJS(), 100);
@@ -1404,6 +1744,13 @@ function setupTabSwitching() {
                 setTimeout(() => {
                     syncPathImageFromSingleAngle();
                     updatePathButtons();
+                }, 50);
+            }
+
+            if (targetTab === 'next-scene') {
+                setTimeout(() => {
+                    syncNextSceneImageFromSingleAngle();
+                    updateNextSceneButton();
                 }, 50);
             }
         });
@@ -1455,6 +1802,48 @@ function syncPathImageFromSingleAngle() {
 
         if (pathThreeScene) pathThreeScene.updateImage(state.uploadedImageBase64);
         addPathLog('Synced image from Single Angle tab (uploaded file)', 'info');
+    }
+}
+
+function syncNextSceneImageFromSingleAngle() {
+    if (nextSceneState.imageUrl || nextSceneState.uploadedImage || nextSceneState.uploadedImageBase64) return;
+    if (!state.imageUrl && !state.uploadedImage && !state.uploadedImageBase64) return;
+
+    if (state.imageUrl) {
+        nextSceneState.imageUrl = state.imageUrl;
+        nextSceneState.sourceImageUrl = state.imageUrl;
+        nextSceneState.uploadedImage = null;
+        nextSceneState.uploadedImageBase64 = null;
+
+        if (nextSceneElements.imageUrlInput) nextSceneElements.imageUrlInput.value = state.imageUrl;
+        if (nextSceneElements.previewImage) {
+            nextSceneElements.previewImage.src = state.imageUrl;
+            nextSceneElements.previewImage.classList.remove('hidden');
+        }
+        if (nextSceneElements.uploadPlaceholder) nextSceneElements.uploadPlaceholder.classList.add('hidden');
+        if (nextSceneElements.clearImage) nextSceneElements.clearImage.classList.remove('hidden');
+        if (nextSceneElements.uploadZone) nextSceneElements.uploadZone.classList.add('has-image');
+
+        addNextSceneLog('Synced image from Single Angle tab (URL)', 'info');
+        return;
+    }
+
+    if (state.uploadedImageBase64 && state.uploadedImage) {
+        nextSceneState.uploadedImage = state.uploadedImage;
+        nextSceneState.uploadedImageBase64 = state.uploadedImageBase64;
+        nextSceneState.imageUrl = null;
+        nextSceneState.sourceImageUrl = null;
+
+        if (nextSceneElements.imageUrlInput) nextSceneElements.imageUrlInput.value = '';
+        if (nextSceneElements.previewImage) {
+            nextSceneElements.previewImage.src = state.uploadedImageBase64;
+            nextSceneElements.previewImage.classList.remove('hidden');
+        }
+        if (nextSceneElements.uploadPlaceholder) nextSceneElements.uploadPlaceholder.classList.add('hidden');
+        if (nextSceneElements.clearImage) nextSceneElements.clearImage.classList.remove('hidden');
+        if (nextSceneElements.uploadZone) nextSceneElements.uploadZone.classList.add('has-image');
+
+        addNextSceneLog('Synced image from Single Angle tab (uploaded file)', 'info');
     }
 }
 
@@ -3067,7 +3456,7 @@ function init() {
     elements.statusMessage = document.getElementById('status-message');
     elements.logsContainer = document.getElementById('logs-container');
     elements.clearLogs = document.getElementById('clear-logs');
-    
+
     // Cache DOM elements - Camera Path Tab
     pathElements.uploadZone = document.getElementById('path-upload-zone');
     pathElements.imageInput = document.getElementById('path-image-input');
@@ -3109,23 +3498,45 @@ function init() {
     pathElements.statusMessage = document.getElementById('path-status-message');
     pathElements.logsContainer = document.getElementById('path-logs-container');
     pathElements.clearLogsBtn = document.getElementById('path-clear-logs');
-    
+
+    // Cache DOM elements - Next Scene Tab
+    nextSceneElements.uploadZone = document.getElementById('next-scene-upload-zone');
+    nextSceneElements.imageInput = document.getElementById('next-scene-image-input');
+    nextSceneElements.uploadPlaceholder = document.getElementById('next-scene-upload-placeholder');
+    nextSceneElements.previewImage = document.getElementById('next-scene-preview-image');
+    nextSceneElements.clearImage = document.getElementById('next-scene-clear-image');
+    nextSceneElements.imageUrlInput = document.getElementById('next-scene-image-url-input');
+    nextSceneElements.loadUrlBtn = document.getElementById('next-scene-load-url-btn');
+    nextSceneElements.prompt = document.getElementById('next-scene-prompt');
+    nextSceneElements.loraScale = document.getElementById('next-scene-lora-scale');
+    nextSceneElements.generateBtn = document.getElementById('next-scene-generate-btn');
+    nextSceneElements.outputContainer = document.getElementById('next-scene-output-container');
+    nextSceneElements.outputPlaceholder = document.getElementById('next-scene-output-placeholder');
+    nextSceneElements.outputImage = document.getElementById('next-scene-output-image');
+    nextSceneElements.downloadBtn = document.getElementById('next-scene-download-btn');
+    nextSceneElements.statusMessage = document.getElementById('next-scene-status-message');
+    nextSceneElements.logsContainer = document.getElementById('next-scene-logs-container');
+    nextSceneElements.clearLogsBtn = document.getElementById('next-scene-clear-logs');
+
     // Initialize Single Angle
     setupEventListeners();
     initThreeJS();
     updateSliderValues();
     updatePromptDisplay();
     updateGenerateButton();
-    
+
     // Initialize Tab Switching
     setupTabSwitching();
-    
+
     // Initialize Camera Path
     setupPathEventListeners();
     updateWaypointsList();
     updatePathButtons();
     updateGallery();
-    
+
+    // Initialize Next Scene
+    setupNextSceneEventListeners();
+    updateNextSceneButton();
 }
 
 // Start when DOM is ready

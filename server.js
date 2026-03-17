@@ -8,6 +8,7 @@ const PORT = process.env.PORT || 3000;
 const upload = multer({ storage: multer.memoryStorage() });
 
 const FAL_MODEL_ID = 'fal-ai/qwen-image-edit-2511-multiple-angles';
+const NEXT_SCENE_MODEL_ID = 'fal-ai/qwen-image-edit-plus-lora-gallery/next-scene';
 const VIDEO_MODEL_BY_KEY = {
     seedance: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video',
     kling26: 'fal-ai/kling-video/v2.6/standard/image-to-video',
@@ -43,6 +44,29 @@ function normalizeVideoResult(result) {
     return data?.video?.url || data?.videos?.[0]?.url || null;
 }
 
+function normalizeNextScenePrompt(prompt) {
+    const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+    if (!trimmedPrompt) {
+        return null;
+    }
+
+    const promptBody = trimmedPrompt.replace(/^next\s*scene\s*:\s*/i, '').trim();
+    if (!promptBody) {
+        return null;
+    }
+
+    return `Next Scene: ${promptBody}`;
+}
+
+function normalizeNextSceneLoraScale(value) {
+    const parsedValue = Number(value);
+    if (!Number.isFinite(parsedValue)) {
+        return 0.75;
+    }
+
+    return Math.min(0.8, Math.max(0.7, parsedValue));
+}
+
 app.post('/api/upload', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
@@ -71,6 +95,39 @@ app.post('/api/generate-image', async (req, res) => {
                 vertical_angle,
                 zoom
             }
+        });
+
+        const outputUrl = normalizeImageResult(result);
+        if (!outputUrl) {
+            return res.status(502).json({ error: 'No image URL was returned by the provider.' });
+        }
+
+        return res.json({ imageUrl: outputUrl });
+    } catch (error) {
+        return sendApiError(res, error);
+    }
+});
+
+app.post('/api/generate-next-scene', async (req, res) => {
+    try {
+        const { imageUrl, prompt, loraScale } = req.body || {};
+
+        if (!imageUrl) {
+            return res.status(400).json({ error: 'imageUrl is required.' });
+        }
+
+        const normalizedPrompt = normalizeNextScenePrompt(prompt);
+        if (!normalizedPrompt) {
+            return res.status(400).json({ error: 'prompt is required and must describe the next scene.' });
+        }
+
+        const result = await fal.subscribe(NEXT_SCENE_MODEL_ID, {
+            input: {
+                image_urls: [imageUrl],
+                prompt: normalizedPrompt,
+                lora_scale: normalizeNextSceneLoraScale(loraScale)
+            },
+            logs: false
         });
 
         const outputUrl = normalizeImageResult(result);
@@ -171,4 +228,3 @@ app.listen(PORT, () => {
     console.log(`Qwen Multi-Angle server running on port ${PORT}`);
     console.log(`Open http://localhost:${PORT} in your browser`);
 });
-
