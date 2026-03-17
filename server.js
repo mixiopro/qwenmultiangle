@@ -121,21 +121,85 @@ app.post('/api/generate-next-scene', async (req, res) => {
             return res.status(400).json({ error: 'prompt is required and must describe the next scene.' });
         }
 
-        const result = await fal.subscribe(NEXT_SCENE_MODEL_ID, {
+        const queueRequest = await fal.queue.submit(NEXT_SCENE_MODEL_ID, {
             input: {
                 image_urls: [imageUrl],
                 prompt: normalizedPrompt,
                 lora_scale: normalizeNextSceneLoraScale(loraScale)
-            },
+            }
+        });
+
+        const requestId = queueRequest?.request_id || queueRequest?.requestId;
+        if (!requestId) {
+            return res.status(502).json({ error: 'No request ID was returned by the provider.' });
+        }
+
+        return res.status(202).json({
+            requestId,
+            status: 'queued',
+            pollUrl: `/api/generate-next-scene/${requestId}`
+        });
+    } catch (error) {
+        return sendApiError(res, error);
+    }
+});
+
+app.get('/api/generate-next-scene/:requestId', async (req, res) => {
+    try {
+        const requestId = req.params?.requestId;
+        if (!requestId) {
+            return res.status(400).json({ error: 'requestId is required.' });
+        }
+
+        const queueStatus = await fal.queue.status(NEXT_SCENE_MODEL_ID, {
+            requestId,
             logs: false
         });
 
-        const outputUrl = normalizeImageResult(result);
-        if (!outputUrl) {
-            return res.status(502).json({ error: 'No image URL was returned by the provider.' });
+        if (queueStatus?.status === 'IN_QUEUE') {
+            return res.json({ status: 'queued' });
         }
 
-        return res.json({ imageUrl: outputUrl });
+        if (queueStatus?.status === 'IN_PROGRESS') {
+            return res.json({ status: 'in_progress' });
+        }
+
+        if (queueStatus?.status === 'COMPLETED') {
+            try {
+                const result = await fal.queue.result(NEXT_SCENE_MODEL_ID, { requestId });
+                const outputUrl = normalizeImageResult(result);
+                if (!outputUrl) {
+                    return res.json({
+                        status: 'failed',
+                        error: 'No image URL was returned by the provider.',
+                        detail: result?.data || result || null
+                    });
+                }
+
+                return res.json({ status: 'completed', imageUrl: outputUrl });
+            } catch (error) {
+                const statusCode = error?.status || error?.response?.status || 500;
+                const body = error?.body || error?.response?.data || null;
+                const message = body?.detail || body?.message || error?.message || 'Next scene generation failed.';
+
+                if ([408, 429, 500, 502, 503, 504].includes(statusCode)) {
+                    return sendApiError(res, error);
+                }
+
+                return res.json({
+                    status: 'failed',
+                    error: message,
+                    detail: body
+                });
+            }
+        }
+
+        const fallbackMessage = queueStatus?.detail || queueStatus?.message || `Unexpected queue status: ${queueStatus?.status || 'unknown'}`;
+        return res.json({
+            status: 'failed',
+            error: typeof fallbackMessage === 'string' ? fallbackMessage : 'Next scene generation failed.',
+            detail: queueStatus || null
+        });
     } catch (error) {
         return sendApiError(res, error);
     }

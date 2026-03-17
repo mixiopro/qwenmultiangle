@@ -54,7 +54,9 @@ let nextSceneState = {
     uploadedImageBase64: null,
     imageUrl: null,
     sourceImageUrl: null,
-    isGenerating: false
+    isGenerating: false,
+    activeRequestId: null,
+    runToken: 0
 };
 
 // ===== DOM Elements =====
@@ -1223,6 +1225,7 @@ function clearNextSceneImage() {
     nextSceneState.uploadedImageBase64 = null;
     nextSceneState.imageUrl = null;
     nextSceneState.sourceImageUrl = null;
+    nextSceneState.activeRequestId = null;
 
     nextSceneElements.previewImage.src = '';
     nextSceneElements.previewImage.classList.add('hidden');
@@ -1462,6 +1465,72 @@ async function downloadImage() {
     }
 }
 
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollNextSceneStatus(requestId, runToken, options = {}) {
+    const pollIntervalMs = options.pollIntervalMs || 2000;
+    const timeoutMs = options.timeoutMs || 180000;
+    const startedAt = Date.now();
+    let lastUiStatus = null;
+
+    while (true) {
+        if (nextSceneState.runToken !== runToken) {
+            throw new Error('A newer next-scene run started. Ignoring stale response.');
+        }
+
+        if (Date.now() - startedAt > timeoutMs) {
+            throw new Error('Next scene generation timed out while waiting for provider completion. Please try again.');
+        }
+
+        const statusResult = await apiRequest(`/api/generate-next-scene/${encodeURIComponent(requestId)}`);
+
+        if (nextSceneState.runToken !== runToken) {
+            throw new Error('A newer next-scene run started. Ignoring stale response.');
+        }
+
+        if (statusResult?.status === 'queued') {
+            if (lastUiStatus !== 'queued') {
+                showNextSceneStatus('Next scene queued... waiting for provider.', 'info');
+                addNextSceneLog('Queue status: queued', 'info');
+                lastUiStatus = 'queued';
+            }
+            await delay(pollIntervalMs);
+            continue;
+        }
+
+        if (statusResult?.status === 'in_progress') {
+            if (lastUiStatus !== 'in_progress') {
+                showNextSceneStatus('Generating next scene... in progress.', 'info');
+                addNextSceneLog('Queue status: in progress', 'info');
+                lastUiStatus = 'in_progress';
+            }
+            await delay(pollIntervalMs);
+            continue;
+        }
+
+        if (statusResult?.status === 'completed') {
+            const outputImageUrl = statusResult?.imageUrl;
+            if (!outputImageUrl) {
+                addNextSceneLog('Error: Completed status returned without an image URL', 'error');
+                throw new Error('No image in completed response. Check logs for details.');
+            }
+            return outputImageUrl;
+        }
+
+        if (statusResult?.status === 'failed') {
+            const providerError = new Error(
+                statusResult?.error || formatError(statusResult?.detail || statusResult)
+            );
+            providerError.body = statusResult;
+            throw providerError;
+        }
+
+        throw new Error(`Unexpected status from next-scene polling: ${statusResult?.status || 'unknown'}`);
+    }
+}
+
 async function generateNextScene() {
     if (!nextSceneState.uploadedImage && !nextSceneState.imageUrl) {
         showNextSceneStatus('Please upload an image or provide a URL', 'error');
@@ -1477,6 +1546,9 @@ async function generateNextScene() {
     }
 
     nextSceneState.isGenerating = true;
+    nextSceneState.runToken += 1;
+    const runToken = nextSceneState.runToken;
+    nextSceneState.activeRequestId = null;
     updateNextSceneButton();
 
     nextSceneElements.generateBtn.classList.add('generating');
@@ -1504,9 +1576,9 @@ async function generateNextScene() {
             addNextSceneLog(`Using provided URL: ${imageUrl}`, 'info');
         }
 
-        showNextSceneStatus('Generating next scene... This may take a moment.', 'info');
+        showNextSceneStatus('Submitting next-scene job...', 'info');
 
-        const result = await apiRequest('/api/generate-next-scene', {
+        const submitResult = await apiRequest('/api/generate-next-scene', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1516,10 +1588,23 @@ async function generateNextScene() {
             })
         });
 
-        const outputImageUrl = result?.imageUrl;
-        if (!outputImageUrl) {
-            addNextSceneLog('Error: Could not extract image URL from response', 'error');
-            throw new Error('No image in response. Check logs for details.');
+        const requestId = submitResult?.requestId;
+        if (!requestId) {
+            addNextSceneLog('Error: No request ID returned from submit endpoint', 'error');
+            throw new Error('No request ID was returned by submit endpoint.');
+        }
+
+        nextSceneState.activeRequestId = requestId;
+        addNextSceneLog(`Submitted next-scene job. requestId=${requestId}`, 'request');
+        showNextSceneStatus('Next scene queued... waiting for provider.', 'info');
+
+        const outputImageUrl = await pollNextSceneStatus(requestId, runToken, {
+            pollIntervalMs: 2000,
+            timeoutMs: 180000
+        });
+
+        if (nextSceneState.runToken !== runToken) {
+            return;
         }
 
         nextSceneElements.outputImage.src = outputImageUrl;
@@ -1534,21 +1619,35 @@ async function generateNextScene() {
         addNextSceneLog(`Success! Image URL: ${outputImageUrl.substring(0, 80)}...`, 'info');
         showNextSceneStatus('Next scene generated successfully!', 'success');
     } catch (error) {
+        if (nextSceneState.runToken !== runToken) {
+            return;
+        }
+
         console.error('Next-scene generation error:', error);
-        const errorMsg = formatError(error?.body || error);
+        const failedPayload = error?.body && error.body.status === 'failed' ? error.body : null;
+        const errorMsg = failedPayload
+            ? (failedPayload.error || formatError(failedPayload.detail || failedPayload))
+            : formatError(error?.body || error);
         addNextSceneLog(`Error: ${errorMsg}`, 'error');
-        if (error?.body && typeof error.body === 'object') {
+
+        if (failedPayload?.detail) {
+            addNextSceneLog(`Provider detail: ${JSON.stringify(failedPayload.detail, null, 2)}`, 'error');
+        } else if (error?.body && typeof error.body === 'object') {
             addNextSceneLog(`Error body: ${JSON.stringify(error.body, null, 2)}`, 'error');
         }
+
         showNextSceneStatus(`Error: ${errorMsg}`, 'error');
     } finally {
-        nextSceneState.isGenerating = false;
-        updateNextSceneButton();
-        nextSceneElements.generateBtn.classList.remove('generating');
-        nextSceneElements.generateBtn.querySelector('.btn-text').textContent = 'Generate Next Scene';
-        nextSceneElements.generateBtn.querySelector('.btn-loader').classList.add('hidden');
-        nextSceneElements.outputContainer.classList.remove('loading');
-        nextSceneElements.outputPlaceholder.classList.remove('loading');
+        if (nextSceneState.runToken === runToken) {
+            nextSceneState.isGenerating = false;
+            nextSceneState.activeRequestId = null;
+            updateNextSceneButton();
+            nextSceneElements.generateBtn.classList.remove('generating');
+            nextSceneElements.generateBtn.querySelector('.btn-text').textContent = 'Generate Next Scene';
+            nextSceneElements.generateBtn.querySelector('.btn-loader').classList.add('hidden');
+            nextSceneElements.outputContainer.classList.remove('loading');
+            nextSceneElements.outputPlaceholder.classList.remove('loading');
+        }
     }
 }
 
