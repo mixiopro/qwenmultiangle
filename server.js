@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 const upload = multer({ storage: multer.memoryStorage() });
 
 const FAL_MODEL_ID = 'fal-ai/qwen-image-edit-2511-multiple-angles';
-const NEXT_SCENE_MODEL_ID = 'fal-ai/qwen-image-edit-plus-lora-gallery/next-scene';
+const NEXT_SCENE_MODEL_ID = 'fal-ai/qwen-image-edit-2509-lora-gallery/next-scene';
 const VIDEO_MODEL_BY_KEY = {
     seedance: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video',
     kling26: 'fal-ai/kling-video/v2.6/standard/image-to-video',
