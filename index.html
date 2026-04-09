@@ -45,6 +45,14 @@
                 </svg>
                 Next-Scene
             </button>
+            <button class="tab-btn" data-tab="light-transfer">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 3v18"/>
+                    <path d="M3 12h18"/>
+                    <circle cx="12" cy="12" r="4"/>
+                </svg>
+                Light-Transfer
+            </button>
             <button class="tab-btn" data-tab="camera-motion" style="display: none;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 7l-9 5-9-5 9-5 9 5z"/>
@@ -414,6 +422,126 @@
                             </summary>
                             <div id="next-scene-logs-container" class="logs-container">
                                 <div class="log-entry info">Next-Scene mode ready. Add an image and describe the scene change.</div>
+                            </div>
+                        </details>
+                    </section>
+                </main>
+            </div>
+
+            <!-- ========== LIGHT TRANSFER TAB ========== -->
+            <div class="tab-panel" id="light-transfer-panel">
+                <main class="main-content">
+                    <section class="left-panel">
+                        <div class="panel-card upload-card">
+                            <h3 class="card-title">Source Image (Input 1)</h3>
+                            <label class="upload-zone" id="light-transfer-source-upload-zone" for="light-transfer-source-image-input">
+                                <input type="file" id="light-transfer-source-image-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" hidden>
+                                <div class="upload-placeholder" id="light-transfer-source-upload-placeholder">
+                                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    <p>Drop source image here or click to upload</p>
+                                </div>
+                                <img id="light-transfer-source-preview-image" class="preview-image hidden" alt="Light transfer source preview">
+                                <button id="light-transfer-source-clear-image" class="clear-btn hidden" type="button">×</button>
+                            </label>
+                            <div class="url-input-section">
+                                <div class="url-divider"><span>or paste URL</span></div>
+                                <div class="url-input-wrapper">
+                                    <input type="text" id="light-transfer-source-image-url-input" placeholder="https://example.com/source.jpg" autocomplete="off">
+                                    <button id="light-transfer-source-load-url-btn" class="load-url-btn">Load</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel-card upload-card">
+                            <h3 class="card-title">Lighting Reference (Input 2)</h3>
+                            <label class="upload-zone" id="light-transfer-reference-upload-zone" for="light-transfer-reference-image-input">
+                                <input type="file" id="light-transfer-reference-image-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" hidden>
+                                <div class="upload-placeholder" id="light-transfer-reference-upload-placeholder">
+                                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    <p>Drop lighting reference here or click to upload</p>
+                                </div>
+                                <img id="light-transfer-reference-preview-image" class="preview-image hidden" alt="Light transfer reference preview">
+                                <button id="light-transfer-reference-clear-image" class="clear-btn hidden" type="button">×</button>
+                            </label>
+                            <div class="url-input-section">
+                                <div class="url-divider"><span>or paste URL</span></div>
+                                <div class="url-input-wrapper">
+                                    <input type="text" id="light-transfer-reference-image-url-input" placeholder="https://example.com/reference.jpg" autocomplete="off">
+                                    <button id="light-transfer-reference-load-url-btn" class="load-url-btn">Load</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel-card">
+                            <h3 class="card-title">Light-Transfer Settings</h3>
+                            <p class="card-subtitle">Fixed prompt is applied server-side using the model README instruction.</p>
+                            <div class="setting-group">
+                                <label for="light-transfer-fixed-prompt">Fixed Prompt</label>
+                                <textarea id="light-transfer-fixed-prompt" rows="3" readonly>参考色调，移除图1原有的光照并参考图2的光照和色调对图1重新照明</textarea>
+                            </div>
+                            <div class="setting-group">
+                                <label for="light-transfer-lora-scale">LoRA Scale</label>
+                                <select id="light-transfer-lora-scale">
+                                    <option value="0.5">0.5</option>
+                                    <option value="0.75" selected>0.75 (Recommended)</option>
+                                    <option value="1.0">1.0</option>
+                                    <option value="1.25">1.25</option>
+                                </select>
+                                <p class="setting-help">LoRA path is managed on backend (env override supported).</p>
+                            </div>
+                        </div>
+
+                        <button id="light-transfer-generate-btn" class="generate-btn" disabled>
+                            <span class="btn-text">Generate Light Transfer</span>
+                            <span class="btn-loader hidden">
+                                <svg class="spinner" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4" stroke-dashoffset="10"/>
+                                </svg>
+                            </span>
+                        </button>
+                    </section>
+
+                    <section class="right-panel">
+                        <div class="panel-card output-card">
+                            <h3 class="card-title">Output</h3>
+                            <div class="output-container" id="light-transfer-output-container">
+                                <div class="output-placeholder" id="light-transfer-output-placeholder">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                                        <polyline points="21 15 16 10 5 21"/>
+                                    </svg>
+                                    <p>Generated light transfer will appear here</p>
+                                </div>
+                                <img id="light-transfer-output-image" class="output-image hidden" alt="Light transfer output">
+                            </div>
+                            <button id="light-transfer-download-btn" class="download-btn hidden">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Download
+                            </button>
+                        </div>
+
+                        <div id="light-transfer-status-message" class="status-message hidden"></div>
+
+                        <details class="logs-panel" open>
+                            <summary class="logs-header">
+                                <span>🔧 Debug Logs</span>
+                                <button id="light-transfer-clear-logs" class="clear-logs-btn">Clear</button>
+                            </summary>
+                            <div id="light-transfer-logs-container" class="logs-container">
+                                <div class="log-entry info">Light-Transfer mode ready. Add source and reference images.</div>
                             </div>
                         </details>
                     </section>

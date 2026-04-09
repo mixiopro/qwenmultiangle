@@ -9,6 +9,9 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const FAL_MODEL_ID = 'fal-ai/qwen-image-edit-2511-multiple-angles';
 const NEXT_SCENE_MODEL_ID = 'fal-ai/qwen-image-edit-plus-lora-gallery/next-scene';
+const LIGHT_TRANSFER_MODEL_ID = 'fal-ai/qwen-image-edit-2509-lora';
+const LIGHT_TRANSFER_FIXED_PROMPT = '参考色调，移除图1原有的光照并参考图2的光照和色调对图1重新照明';
+const DEFAULT_LIGHT_TRANSFER_LORA_PATH = 'https://huggingface.co/dx8152/Qwen-Edit-2509-Light-Migration/resolve/main/%E5%8F%82%E8%80%83%E8%89%B2%E8%B0%83.safetensors';
 const VIDEO_MODEL_BY_KEY = {
     seedance: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video',
     kling26: 'fal-ai/kling-video/v2.6/standard/image-to-video',
@@ -65,6 +68,23 @@ function normalizeNextSceneLoraScale(value) {
     }
 
     return Math.min(0.8, Math.max(0.7, parsedValue));
+}
+
+function normalizeLightTransferLoraScale(value) {
+    const parsedValue = Number(value);
+    if (!Number.isFinite(parsedValue)) {
+        return 0.75;
+    }
+
+    return Math.min(4, Math.max(0, parsedValue));
+}
+
+function resolveLightTransferLoraPath() {
+    const envPath = typeof process.env.QWEN_LIGHT_TRANSFER_LORA_PATH === 'string'
+        ? process.env.QWEN_LIGHT_TRANSFER_LORA_PATH.trim()
+        : '';
+
+    return envPath || DEFAULT_LIGHT_TRANSFER_LORA_PATH;
 }
 
 app.post('/api/upload', upload.single('image'), async (req, res) => {
@@ -198,6 +218,107 @@ app.get('/api/generate-next-scene/:requestId', async (req, res) => {
         return res.json({
             status: 'failed',
             error: typeof fallbackMessage === 'string' ? fallbackMessage : 'Next scene generation failed.',
+            detail: queueStatus || null
+        });
+    } catch (error) {
+        return sendApiError(res, error);
+    }
+});
+
+app.post('/api/generate-light-transfer', async (req, res) => {
+    try {
+        const { sourceImageUrl, referenceImageUrl, loraScale } = req.body || {};
+
+        if (!sourceImageUrl) {
+            return res.status(400).json({ error: 'sourceImageUrl is required.' });
+        }
+
+        if (!referenceImageUrl) {
+            return res.status(400).json({ error: 'referenceImageUrl is required.' });
+        }
+
+        const queueRequest = await fal.queue.submit(LIGHT_TRANSFER_MODEL_ID, {
+            input: {
+                prompt: LIGHT_TRANSFER_FIXED_PROMPT,
+                image_urls: [sourceImageUrl, referenceImageUrl],
+                loras: [
+                    {
+                        path: resolveLightTransferLoraPath(),
+                        scale: normalizeLightTransferLoraScale(loraScale)
+                    }
+                ]
+            }
+        });
+
+        const requestId = queueRequest?.request_id || queueRequest?.requestId;
+        if (!requestId) {
+            return res.status(502).json({ error: 'No request ID was returned by the provider.' });
+        }
+
+        return res.status(202).json({
+            requestId,
+            status: 'queued',
+            pollUrl: `/api/generate-light-transfer/${requestId}`
+        });
+    } catch (error) {
+        return sendApiError(res, error);
+    }
+});
+
+app.get('/api/generate-light-transfer/:requestId', async (req, res) => {
+    try {
+        const requestId = req.params?.requestId;
+        if (!requestId) {
+            return res.status(400).json({ error: 'requestId is required.' });
+        }
+
+        const queueStatus = await fal.queue.status(LIGHT_TRANSFER_MODEL_ID, {
+            requestId,
+            logs: false
+        });
+
+        if (queueStatus?.status === 'IN_QUEUE') {
+            return res.json({ status: 'queued' });
+        }
+
+        if (queueStatus?.status === 'IN_PROGRESS') {
+            return res.json({ status: 'in_progress' });
+        }
+
+        if (queueStatus?.status === 'COMPLETED') {
+            try {
+                const result = await fal.queue.result(LIGHT_TRANSFER_MODEL_ID, { requestId });
+                const outputUrl = normalizeImageResult(result);
+                if (!outputUrl) {
+                    return res.json({
+                        status: 'failed',
+                        error: 'No image URL was returned by the provider.',
+                        detail: result?.data || result || null
+                    });
+                }
+
+                return res.json({ status: 'completed', imageUrl: outputUrl });
+            } catch (error) {
+                const statusCode = error?.status || error?.response?.status || 500;
+                const body = error?.body || error?.response?.data || null;
+                const message = body?.detail || body?.message || error?.message || 'Light transfer generation failed.';
+
+                if ([408, 429, 500, 502, 503, 504].includes(statusCode)) {
+                    return sendApiError(res, error);
+                }
+
+                return res.json({
+                    status: 'failed',
+                    error: message,
+                    detail: body
+                });
+            }
+        }
+
+        const fallbackMessage = queueStatus?.detail || queueStatus?.message || `Unexpected queue status: ${queueStatus?.status || 'unknown'}`;
+        return res.json({
+            status: 'failed',
+            error: typeof fallbackMessage === 'string' ? fallbackMessage : 'Light transfer generation failed.',
             detail: queueStatus || null
         });
     } catch (error) {

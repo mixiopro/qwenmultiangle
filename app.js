@@ -59,10 +59,26 @@ let nextSceneState = {
     runToken: 0
 };
 
+// ===== Light Transfer State =====
+let lightTransferState = {
+    sourceUploadedImage: null,
+    sourceUploadedImageBase64: null,
+    sourceImageUrl: null,
+    sourceResolvedImageUrl: null,
+    referenceUploadedImage: null,
+    referenceUploadedImageBase64: null,
+    referenceImageUrl: null,
+    referenceResolvedImageUrl: null,
+    isGenerating: false,
+    activeRequestId: null,
+    runToken: 0
+};
+
 // ===== DOM Elements =====
 const elements = {};
 const pathElements = {};
 const nextSceneElements = {};
+const lightTransferElements = {};
 
 // ===== Seedance Segment Cache (localStorage) =====
 const AI_SEGMENTS_CACHE_KEY = 'qwenmultiangle_ai_segments_cache_v1';
@@ -244,6 +260,14 @@ function updateNextSceneButton() {
     }
 }
 
+function updateLightTransferButton() {
+    const hasSource = lightTransferState.sourceUploadedImage !== null || lightTransferState.sourceImageUrl !== null;
+    const hasReference = lightTransferState.referenceUploadedImage !== null || lightTransferState.referenceImageUrl !== null;
+    if (lightTransferElements.generateBtn) {
+        lightTransferElements.generateBtn.disabled = !hasSource || !hasReference || lightTransferState.isGenerating;
+    }
+}
+
 function showStatus(message, type = 'info') {
     elements.statusMessage.textContent = message;
     elements.statusMessage.className = `status-message ${type}`;
@@ -273,6 +297,21 @@ function showNextSceneStatus(message, type = 'info') {
 
 function hideNextSceneStatus() {
     nextSceneElements.statusMessage?.classList.add('hidden');
+}
+
+function showLightTransferStatus(message, type = 'info') {
+    const el = lightTransferElements.statusMessage;
+    if (!el) return;
+    el.textContent = message;
+    el.className = `status-message ${type}`;
+    el.classList.remove('hidden');
+    if (type === 'success') {
+        setTimeout(() => el.classList.add('hidden'), 5000);
+    }
+}
+
+function hideLightTransferStatus() {
+    lightTransferElements.statusMessage?.classList.add('hidden');
 }
 
 // ===== Logging System =====
@@ -345,6 +384,38 @@ function addNextSceneLog(message, type = 'info') {
 function clearNextSceneLogs() {
     if (nextSceneElements.logsContainer) {
         nextSceneElements.logsContainer.innerHTML = '<div class="log-entry info">Logs cleared.</div>';
+    }
+}
+
+function addLightTransferLog(message, type = 'info') {
+    const container = lightTransferElements.logsContainer;
+    if (!container) return;
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+
+    const timestamp = document.createElement('span');
+    timestamp.className = 'log-timestamp';
+    timestamp.textContent = `[${getTimestamp()}]`;
+    entry.appendChild(timestamp);
+
+    let messageText = message;
+    if (typeof message === 'object') {
+        try {
+            messageText = JSON.stringify(message, null, 2);
+        } catch (e) {
+            messageText = String(message);
+        }
+    }
+
+    entry.appendChild(document.createTextNode(messageText));
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearLightTransferLogs() {
+    if (lightTransferElements.logsContainer) {
+        lightTransferElements.logsContainer.innerHTML = '<div class="log-entry info">Logs cleared.</div>';
     }
 }
 
@@ -1299,6 +1370,174 @@ function loadNextSceneImageFromUrl(url) {
     img.src = url;
 }
 
+function applyLightTransferImageUrlToUi(kind, url) {
+    const isSource = kind === 'source';
+    const uploadPlaceholder = isSource ? lightTransferElements.sourceUploadPlaceholder : lightTransferElements.referenceUploadPlaceholder;
+    const clearImage = isSource ? lightTransferElements.sourceClearImage : lightTransferElements.referenceClearImage;
+    const uploadZone = isSource ? lightTransferElements.sourceUploadZone : lightTransferElements.referenceUploadZone;
+    const previewImage = isSource ? lightTransferElements.sourcePreviewImage : lightTransferElements.referencePreviewImage;
+
+    if (!uploadPlaceholder || !clearImage || !uploadZone || !previewImage) return;
+
+    uploadPlaceholder.innerHTML = `
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <p style="font-size: 11px; word-break: break-all; color: var(--accent);">URL loaded</p>
+        <p style="font-size: 10px; word-break: break-all; opacity: 0.6;">${url.length > 40 ? url.substring(0, 40) + '...' : url}</p>
+    `;
+
+    clearImage.classList.remove('hidden');
+    uploadZone.classList.add('has-image');
+
+    const img = new Image();
+    img.onload = () => {
+        previewImage.src = url;
+        previewImage.classList.remove('hidden');
+        uploadPlaceholder.classList.add('hidden');
+        addLightTransferLog(`${isSource ? 'Source' : 'Reference'} image preview loaded successfully`, 'info');
+        hideLightTransferStatus();
+    };
+
+    img.onerror = () => {
+        addLightTransferLog(`Could not preview ${isSource ? 'source' : 'reference'} image (CORS/network), but URL is set for generation`, 'warn');
+        previewImage.classList.add('hidden');
+        uploadPlaceholder.classList.remove('hidden');
+        hideLightTransferStatus();
+    };
+
+    img.src = url;
+}
+
+function handleLightTransferImageUpload(kind, file) {
+    const isSource = kind === 'source';
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+        showLightTransferStatus(validation.error, 'error');
+        addLightTransferLog(`Error: ${validation.error}`, 'error');
+        return;
+    }
+
+    addLightTransferLog(`Uploading ${isSource ? 'source' : 'reference'} image: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${file.type})`, 'info');
+
+    if (isSource) {
+        lightTransferState.sourceImageUrl = null;
+        lightTransferState.sourceResolvedImageUrl = null;
+        if (lightTransferElements.sourceImageUrlInput) {
+            lightTransferElements.sourceImageUrlInput.value = '';
+        }
+    } else {
+        lightTransferState.referenceImageUrl = null;
+        lightTransferState.referenceResolvedImageUrl = null;
+        if (lightTransferElements.referenceImageUrlInput) {
+            lightTransferElements.referenceImageUrlInput.value = '';
+        }
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        if (isSource) {
+            lightTransferState.sourceUploadedImage = file;
+            lightTransferState.sourceUploadedImageBase64 = e.target.result;
+            lightTransferElements.sourcePreviewImage.src = e.target.result;
+            lightTransferElements.sourcePreviewImage.classList.remove('hidden');
+            lightTransferElements.sourceUploadPlaceholder.classList.add('hidden');
+            lightTransferElements.sourceClearImage.classList.remove('hidden');
+            lightTransferElements.sourceUploadZone.classList.add('has-image');
+        } else {
+            lightTransferState.referenceUploadedImage = file;
+            lightTransferState.referenceUploadedImageBase64 = e.target.result;
+            lightTransferElements.referencePreviewImage.src = e.target.result;
+            lightTransferElements.referencePreviewImage.classList.remove('hidden');
+            lightTransferElements.referenceUploadPlaceholder.classList.add('hidden');
+            lightTransferElements.referenceClearImage.classList.remove('hidden');
+            lightTransferElements.referenceUploadZone.classList.add('has-image');
+        }
+
+        addLightTransferLog(`${isSource ? 'Source' : 'Reference'} image loaded successfully. Base64 size: ${(e.target.result.length / 1024).toFixed(1)} KB`, 'info');
+        updateLightTransferButton();
+        hideLightTransferStatus();
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearLightTransferImage(kind) {
+    const isSource = kind === 'source';
+    const previewImage = isSource ? lightTransferElements.sourcePreviewImage : lightTransferElements.referencePreviewImage;
+    const uploadPlaceholder = isSource ? lightTransferElements.sourceUploadPlaceholder : lightTransferElements.referenceUploadPlaceholder;
+    const clearImage = isSource ? lightTransferElements.sourceClearImage : lightTransferElements.referenceClearImage;
+    const uploadZone = isSource ? lightTransferElements.sourceUploadZone : lightTransferElements.referenceUploadZone;
+    const imageUrlInput = isSource ? lightTransferElements.sourceImageUrlInput : lightTransferElements.referenceImageUrlInput;
+
+    if (isSource) {
+        lightTransferState.sourceUploadedImage = null;
+        lightTransferState.sourceUploadedImageBase64 = null;
+        lightTransferState.sourceImageUrl = null;
+        lightTransferState.sourceResolvedImageUrl = null;
+    } else {
+        lightTransferState.referenceUploadedImage = null;
+        lightTransferState.referenceUploadedImageBase64 = null;
+        lightTransferState.referenceImageUrl = null;
+        lightTransferState.referenceResolvedImageUrl = null;
+    }
+
+    if (previewImage) {
+        previewImage.src = '';
+        previewImage.classList.add('hidden');
+    }
+    if (uploadPlaceholder) {
+        uploadPlaceholder.classList.remove('hidden');
+        uploadPlaceholder.innerHTML = `
+            <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <p>${isSource ? 'Drop source image here or click to upload' : 'Drop lighting reference here or click to upload'}</p>
+        `;
+    }
+    if (clearImage) clearImage.classList.add('hidden');
+    if (uploadZone) uploadZone.classList.remove('has-image');
+    if (imageUrlInput) imageUrlInput.value = '';
+
+    updateLightTransferButton();
+}
+
+function loadLightTransferImageFromUrl(kind, url) {
+    const isSource = kind === 'source';
+    const validation = validateImageUrl(url);
+    if (!validation.valid) {
+        showLightTransferStatus(validation.error, 'error');
+        addLightTransferLog(`Error: ${validation.error}`, 'error');
+        return;
+    }
+
+    url = url.trim();
+
+    if (validation.warning) {
+        addLightTransferLog(`Warning: ${validation.warning}`, 'warn');
+    }
+
+    addLightTransferLog(`Loading ${isSource ? 'source' : 'reference'} image from URL: ${url}`, 'info');
+    showLightTransferStatus('Loading image...', 'info');
+
+    if (isSource) {
+        lightTransferState.sourceUploadedImage = null;
+        lightTransferState.sourceUploadedImageBase64 = null;
+        lightTransferState.sourceImageUrl = url;
+        lightTransferState.sourceResolvedImageUrl = url;
+    } else {
+        lightTransferState.referenceUploadedImage = null;
+        lightTransferState.referenceUploadedImageBase64 = null;
+        lightTransferState.referenceImageUrl = url;
+        lightTransferState.referenceResolvedImageUrl = url;
+    }
+
+    applyLightTransferImageUrlToUi(kind, url);
+    updateLightTransferButton();
+}
+
 // ===== Backend API Helpers =====
 async function apiRequest(url, options = {}) {
     const response = await fetch(url, options);
@@ -1672,6 +1911,334 @@ async function downloadNextSceneImage() {
     }
 }
 
+async function pollLightTransferStatus(requestId, runToken, options = {}) {
+    const pollIntervalMs = options.pollIntervalMs || 2000;
+    const timeoutMs = options.timeoutMs || 180000;
+    const startedAt = Date.now();
+    let lastUiStatus = null;
+
+    while (true) {
+        if (lightTransferState.runToken !== runToken) {
+            throw new Error('A newer light-transfer run started. Ignoring stale response.');
+        }
+
+        if (Date.now() - startedAt > timeoutMs) {
+            throw new Error('Light transfer generation timed out while waiting for provider completion. Please try again.');
+        }
+
+        const statusResult = await apiRequest(`/api/generate-light-transfer/${encodeURIComponent(requestId)}`);
+
+        if (lightTransferState.runToken !== runToken) {
+            throw new Error('A newer light-transfer run started. Ignoring stale response.');
+        }
+
+        if (statusResult?.status === 'queued') {
+            if (lastUiStatus !== 'queued') {
+                showLightTransferStatus('Light transfer queued... waiting for provider.', 'info');
+                addLightTransferLog('Queue status: queued', 'info');
+                lastUiStatus = 'queued';
+            }
+            await delay(pollIntervalMs);
+            continue;
+        }
+
+        if (statusResult?.status === 'in_progress') {
+            if (lastUiStatus !== 'in_progress') {
+                showLightTransferStatus('Generating light transfer... in progress.', 'info');
+                addLightTransferLog('Queue status: in progress', 'info');
+                lastUiStatus = 'in_progress';
+            }
+            await delay(pollIntervalMs);
+            continue;
+        }
+
+        if (statusResult?.status === 'completed') {
+            const outputImageUrl = statusResult?.imageUrl;
+            if (!outputImageUrl) {
+                addLightTransferLog('Error: Completed status returned without an image URL', 'error');
+                throw new Error('No image in completed response. Check logs for details.');
+            }
+            return outputImageUrl;
+        }
+
+        if (statusResult?.status === 'failed') {
+            const providerError = new Error(
+                statusResult?.error || formatError(statusResult?.detail || statusResult)
+            );
+            providerError.body = statusResult;
+            throw providerError;
+        }
+
+        throw new Error(`Unexpected status from light-transfer polling: ${statusResult?.status || 'unknown'}`);
+    }
+}
+
+async function generateLightTransfer() {
+    const hasSource = !!(lightTransferState.sourceUploadedImage || lightTransferState.sourceImageUrl);
+    const hasReference = !!(lightTransferState.referenceUploadedImage || lightTransferState.referenceImageUrl);
+    if (!hasSource || !hasReference) {
+        showLightTransferStatus('Please provide both source and reference images', 'error');
+        addLightTransferLog('Error: Missing source or reference image', 'error');
+        return;
+    }
+
+    lightTransferState.isGenerating = true;
+    lightTransferState.runToken += 1;
+    const runToken = lightTransferState.runToken;
+    lightTransferState.activeRequestId = null;
+    updateLightTransferButton();
+
+    lightTransferElements.generateBtn.classList.add('generating');
+    lightTransferElements.generateBtn.querySelector('.btn-text').textContent = 'Generating...';
+    lightTransferElements.generateBtn.querySelector('.btn-loader').classList.remove('hidden');
+    lightTransferElements.outputContainer.classList.add('loading');
+    lightTransferElements.outputPlaceholder.classList.add('loading');
+
+    hideLightTransferStatus();
+    addLightTransferLog('Calling backend light-transfer API...', 'info');
+    addLightTransferLog(`LoRA scale: ${lightTransferElements.loraScale?.value || '0.75'}`, 'info');
+
+    try {
+        let sourceImageUrl = lightTransferState.sourceImageUrl;
+        let referenceImageUrl = lightTransferState.referenceImageUrl;
+
+        if (!sourceImageUrl) {
+            showLightTransferStatus('Uploading source image...', 'info');
+            addLightTransferLog('Uploading source image via backend...', 'request');
+            sourceImageUrl = await uploadImageToBackend(lightTransferState.sourceUploadedImage);
+            lightTransferState.sourceResolvedImageUrl = sourceImageUrl;
+            addLightTransferLog(`Source image uploaded: ${sourceImageUrl}`, 'response');
+        } else {
+            lightTransferState.sourceResolvedImageUrl = sourceImageUrl;
+            addLightTransferLog(`Using source URL: ${sourceImageUrl}`, 'info');
+        }
+
+        if (!referenceImageUrl) {
+            showLightTransferStatus('Uploading reference image...', 'info');
+            addLightTransferLog('Uploading reference image via backend...', 'request');
+            referenceImageUrl = await uploadImageToBackend(lightTransferState.referenceUploadedImage);
+            lightTransferState.referenceResolvedImageUrl = referenceImageUrl;
+            addLightTransferLog(`Reference image uploaded: ${referenceImageUrl}`, 'response');
+        } else {
+            lightTransferState.referenceResolvedImageUrl = referenceImageUrl;
+            addLightTransferLog(`Using reference URL: ${referenceImageUrl}`, 'info');
+        }
+
+        showLightTransferStatus('Submitting light-transfer job...', 'info');
+
+        const submitResult = await apiRequest('/api/generate-light-transfer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sourceImageUrl,
+                referenceImageUrl,
+                loraScale: lightTransferElements.loraScale?.value || '0.75'
+            })
+        });
+
+        const requestId = submitResult?.requestId;
+        if (!requestId) {
+            addLightTransferLog('Error: No request ID returned from submit endpoint', 'error');
+            throw new Error('No request ID was returned by submit endpoint.');
+        }
+
+        lightTransferState.activeRequestId = requestId;
+        addLightTransferLog(`Submitted light-transfer job. requestId=${requestId}`, 'request');
+        showLightTransferStatus('Light transfer queued... waiting for provider.', 'info');
+
+        const outputImageUrl = await pollLightTransferStatus(requestId, runToken, {
+            pollIntervalMs: 2000,
+            timeoutMs: 180000
+        });
+
+        if (lightTransferState.runToken !== runToken) {
+            return;
+        }
+
+        lightTransferElements.outputImage.src = outputImageUrl;
+        lightTransferElements.outputImage.classList.remove('hidden');
+        lightTransferElements.outputPlaceholder.classList.add('hidden');
+        lightTransferElements.downloadBtn.classList.remove('hidden');
+        lightTransferElements.outputContainer.classList.add('success');
+        setTimeout(() => {
+            lightTransferElements.outputContainer.classList.remove('success');
+        }, 600);
+
+        addLightTransferLog(`Success! Image URL: ${outputImageUrl.substring(0, 80)}...`, 'info');
+        showLightTransferStatus('Light transfer generated successfully!', 'success');
+    } catch (error) {
+        if (lightTransferState.runToken !== runToken) {
+            return;
+        }
+
+        console.error('Light-transfer generation error:', error);
+        const failedPayload = error?.body && error.body.status === 'failed' ? error.body : null;
+        const errorMsg = failedPayload
+            ? (failedPayload.error || formatError(failedPayload.detail || failedPayload))
+            : formatError(error?.body || error);
+        addLightTransferLog(`Error: ${errorMsg}`, 'error');
+
+        if (failedPayload?.detail) {
+            addLightTransferLog(`Provider detail: ${JSON.stringify(failedPayload.detail, null, 2)}`, 'error');
+        } else if (error?.body && typeof error.body === 'object') {
+            addLightTransferLog(`Error body: ${JSON.stringify(error.body, null, 2)}`, 'error');
+        }
+
+        showLightTransferStatus(`Error: ${errorMsg}`, 'error');
+    } finally {
+        if (lightTransferState.runToken === runToken) {
+            lightTransferState.isGenerating = false;
+            lightTransferState.activeRequestId = null;
+            updateLightTransferButton();
+            lightTransferElements.generateBtn.classList.remove('generating');
+            lightTransferElements.generateBtn.querySelector('.btn-text').textContent = 'Generate Light Transfer';
+            lightTransferElements.generateBtn.querySelector('.btn-loader').classList.add('hidden');
+            lightTransferElements.outputContainer.classList.remove('loading');
+            lightTransferElements.outputPlaceholder.classList.remove('loading');
+        }
+    }
+}
+
+async function downloadLightTransferImage() {
+    const imageUrl = lightTransferElements.outputImage?.src;
+    if (!imageUrl) return;
+
+    try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mixio-light-transfer-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        window.open(imageUrl, '_blank');
+    }
+}
+
+function setupLightTransferEventListeners() {
+    lightTransferElements.sourceUploadZone?.addEventListener('click', () => lightTransferElements.sourceImageInput.click());
+    lightTransferElements.sourceImageInput?.addEventListener('change', (e) => {
+        if (e.target.files?.[0]) {
+            handleLightTransferImageUpload('source', e.target.files[0]);
+        }
+    });
+    lightTransferElements.sourceUploadZone?.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        lightTransferElements.sourceUploadZone.classList.add('drag-over');
+    });
+    lightTransferElements.sourceUploadZone?.addEventListener('dragleave', () => {
+        lightTransferElements.sourceUploadZone.classList.remove('drag-over');
+    });
+    lightTransferElements.sourceUploadZone?.addEventListener('drop', (e) => {
+        e.preventDefault();
+        lightTransferElements.sourceUploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files?.[0]) {
+            handleLightTransferImageUpload('source', e.dataTransfer.files[0]);
+        }
+    });
+    lightTransferElements.sourceClearImage?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearLightTransferImage('source');
+    });
+    lightTransferElements.sourceLoadUrlBtn?.addEventListener('click', () => {
+        loadLightTransferImageFromUrl('source', lightTransferElements.sourceImageUrlInput.value);
+    });
+    lightTransferElements.sourceImageUrlInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            loadLightTransferImageFromUrl('source', lightTransferElements.sourceImageUrlInput.value);
+        }
+    });
+
+    lightTransferElements.referenceUploadZone?.addEventListener('click', () => lightTransferElements.referenceImageInput.click());
+    lightTransferElements.referenceImageInput?.addEventListener('change', (e) => {
+        if (e.target.files?.[0]) {
+            handleLightTransferImageUpload('reference', e.target.files[0]);
+        }
+    });
+    lightTransferElements.referenceUploadZone?.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        lightTransferElements.referenceUploadZone.classList.add('drag-over');
+    });
+    lightTransferElements.referenceUploadZone?.addEventListener('dragleave', () => {
+        lightTransferElements.referenceUploadZone.classList.remove('drag-over');
+    });
+    lightTransferElements.referenceUploadZone?.addEventListener('drop', (e) => {
+        e.preventDefault();
+        lightTransferElements.referenceUploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files?.[0]) {
+            handleLightTransferImageUpload('reference', e.dataTransfer.files[0]);
+        }
+    });
+    lightTransferElements.referenceClearImage?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearLightTransferImage('reference');
+    });
+    lightTransferElements.referenceLoadUrlBtn?.addEventListener('click', () => {
+        loadLightTransferImageFromUrl('reference', lightTransferElements.referenceImageUrlInput.value);
+    });
+    lightTransferElements.referenceImageUrlInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            loadLightTransferImageFromUrl('reference', lightTransferElements.referenceImageUrlInput.value);
+        }
+    });
+
+    lightTransferElements.loraScale?.addEventListener('change', updateLightTransferButton);
+    lightTransferElements.generateBtn?.addEventListener('click', generateLightTransfer);
+    lightTransferElements.downloadBtn?.addEventListener('click', downloadLightTransferImage);
+    lightTransferElements.clearLogsBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearLightTransferLogs();
+    });
+}
+
+function syncLightTransferSourceFromSingleAngle() {
+    if (lightTransferState.sourceImageUrl || lightTransferState.sourceUploadedImage || lightTransferState.sourceUploadedImageBase64) return;
+    if (!state.imageUrl && !state.uploadedImage && !state.uploadedImageBase64) return;
+
+    if (state.imageUrl) {
+        lightTransferState.sourceImageUrl = state.imageUrl;
+        lightTransferState.sourceResolvedImageUrl = state.imageUrl;
+        lightTransferState.sourceUploadedImage = null;
+        lightTransferState.sourceUploadedImageBase64 = null;
+
+        if (lightTransferElements.sourceImageUrlInput) lightTransferElements.sourceImageUrlInput.value = state.imageUrl;
+        if (lightTransferElements.sourcePreviewImage) {
+            lightTransferElements.sourcePreviewImage.src = state.imageUrl;
+            lightTransferElements.sourcePreviewImage.classList.remove('hidden');
+        }
+        if (lightTransferElements.sourceUploadPlaceholder) lightTransferElements.sourceUploadPlaceholder.classList.add('hidden');
+        if (lightTransferElements.sourceClearImage) lightTransferElements.sourceClearImage.classList.remove('hidden');
+        if (lightTransferElements.sourceUploadZone) lightTransferElements.sourceUploadZone.classList.add('has-image');
+
+        addLightTransferLog('Synced source image from Single Angle tab (URL)', 'info');
+        return;
+    }
+
+    if (state.uploadedImageBase64 && state.uploadedImage) {
+        lightTransferState.sourceUploadedImage = state.uploadedImage;
+        lightTransferState.sourceUploadedImageBase64 = state.uploadedImageBase64;
+        lightTransferState.sourceImageUrl = null;
+        lightTransferState.sourceResolvedImageUrl = null;
+
+        if (lightTransferElements.sourceImageUrlInput) lightTransferElements.sourceImageUrlInput.value = '';
+        if (lightTransferElements.sourcePreviewImage) {
+            lightTransferElements.sourcePreviewImage.src = state.uploadedImageBase64;
+            lightTransferElements.sourcePreviewImage.classList.remove('hidden');
+        }
+        if (lightTransferElements.sourceUploadPlaceholder) lightTransferElements.sourceUploadPlaceholder.classList.add('hidden');
+        if (lightTransferElements.sourceClearImage) lightTransferElements.sourceClearImage.classList.remove('hidden');
+        if (lightTransferElements.sourceUploadZone) lightTransferElements.sourceUploadZone.classList.add('has-image');
+
+        addLightTransferLog('Synced source image from Single Angle tab (uploaded file)', 'info');
+    }
+}
+
 // ===== Event Listeners Setup =====
 function setupEventListeners() {
     // Image upload - click
@@ -1850,6 +2417,13 @@ function setupTabSwitching() {
                 setTimeout(() => {
                     syncNextSceneImageFromSingleAngle();
                     updateNextSceneButton();
+                }, 50);
+            }
+
+            if (targetTab === 'light-transfer') {
+                setTimeout(() => {
+                    syncLightTransferSourceFromSingleAngle();
+                    updateLightTransferButton();
                 }, 50);
             }
         });
@@ -3617,6 +4191,31 @@ function init() {
     nextSceneElements.logsContainer = document.getElementById('next-scene-logs-container');
     nextSceneElements.clearLogsBtn = document.getElementById('next-scene-clear-logs');
 
+    // Cache DOM elements - Light Transfer Tab
+    lightTransferElements.sourceUploadZone = document.getElementById('light-transfer-source-upload-zone');
+    lightTransferElements.sourceImageInput = document.getElementById('light-transfer-source-image-input');
+    lightTransferElements.sourceUploadPlaceholder = document.getElementById('light-transfer-source-upload-placeholder');
+    lightTransferElements.sourcePreviewImage = document.getElementById('light-transfer-source-preview-image');
+    lightTransferElements.sourceClearImage = document.getElementById('light-transfer-source-clear-image');
+    lightTransferElements.sourceImageUrlInput = document.getElementById('light-transfer-source-image-url-input');
+    lightTransferElements.sourceLoadUrlBtn = document.getElementById('light-transfer-source-load-url-btn');
+    lightTransferElements.referenceUploadZone = document.getElementById('light-transfer-reference-upload-zone');
+    lightTransferElements.referenceImageInput = document.getElementById('light-transfer-reference-image-input');
+    lightTransferElements.referenceUploadPlaceholder = document.getElementById('light-transfer-reference-upload-placeholder');
+    lightTransferElements.referencePreviewImage = document.getElementById('light-transfer-reference-preview-image');
+    lightTransferElements.referenceClearImage = document.getElementById('light-transfer-reference-clear-image');
+    lightTransferElements.referenceImageUrlInput = document.getElementById('light-transfer-reference-image-url-input');
+    lightTransferElements.referenceLoadUrlBtn = document.getElementById('light-transfer-reference-load-url-btn');
+    lightTransferElements.loraScale = document.getElementById('light-transfer-lora-scale');
+    lightTransferElements.generateBtn = document.getElementById('light-transfer-generate-btn');
+    lightTransferElements.outputContainer = document.getElementById('light-transfer-output-container');
+    lightTransferElements.outputPlaceholder = document.getElementById('light-transfer-output-placeholder');
+    lightTransferElements.outputImage = document.getElementById('light-transfer-output-image');
+    lightTransferElements.downloadBtn = document.getElementById('light-transfer-download-btn');
+    lightTransferElements.statusMessage = document.getElementById('light-transfer-status-message');
+    lightTransferElements.logsContainer = document.getElementById('light-transfer-logs-container');
+    lightTransferElements.clearLogsBtn = document.getElementById('light-transfer-clear-logs');
+
     // Initialize Single Angle
     setupEventListeners();
     initThreeJS();
@@ -3636,6 +4235,10 @@ function init() {
     // Initialize Next Scene
     setupNextSceneEventListeners();
     updateNextSceneButton();
+
+    // Initialize Light Transfer
+    setupLightTransferEventListeners();
+    updateLightTransferButton();
 }
 
 // Start when DOM is ready

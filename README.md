@@ -12,6 +12,7 @@ A small web app that lets you adjust a virtual camera (azimuth, elevation, zoom)
 - Works with an uploaded image or an image URL
 - Multi-image keyframes + camera motion (image-to-video) mode
 - Next-Scene tab for generating a follow-up scene from a source image
+- Light-Transfer tab for relighting a source image using a lighting reference image
 - Backend-managed API access using environment configuration
 
 ## Credits & Inspiration
@@ -56,6 +57,24 @@ The backend sends this as:
 ```text
 Next Scene: The camera pulls back to reveal a wider view of the city as neon reflections flicker across the wet street.
 ```
+
+## Light-Transfer Workflow
+
+The app includes a dedicated **Light-Transfer** tab powered by fal's `fal-ai/qwen-image-edit-2509-lora` model.
+
+- Input 1 (`image_urls[0]`): source image to be relit
+- Input 2 (`image_urls[1]`): lighting reference image
+- Fixed prompt is applied server-side:
+
+```text
+参考色调，移除图1原有的光照并参考图2的光照和色调对图1重新照明
+```
+
+- LoRA is passed via `loras: [{ path, scale }]`
+- Default LoRA path points to the Hugging Face safetensors file in this repo:
+  - `https://huggingface.co/dx8152/Qwen-Edit-2509-Light-Migration/resolve/main/%E5%8F%82%E8%80%83%E8%89%B2%E8%B0%83.safetensors`
+- Override LoRA path with backend env var:
+  - `QWEN_LIGHT_TRANSFER_LORA_PATH`
 
 ## Project Structure
 
