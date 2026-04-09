@@ -2121,7 +2121,6 @@ async function downloadLightTransferImage() {
 }
 
 function setupLightTransferEventListeners() {
-    lightTransferElements.sourceUploadZone?.addEventListener('click', () => lightTransferElements.sourceImageInput.click());
     lightTransferElements.sourceImageInput?.addEventListener('change', (e) => {
         if (e.target.files?.[0]) {
             handleLightTransferImageUpload('source', e.target.files[0]);
@@ -2142,6 +2141,7 @@ function setupLightTransferEventListeners() {
         }
     });
     lightTransferElements.sourceClearImage?.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         clearLightTransferImage('source');
     });
@@ -2154,7 +2154,6 @@ function setupLightTransferEventListeners() {
         }
     });
 
-    lightTransferElements.referenceUploadZone?.addEventListener('click', () => lightTransferElements.referenceImageInput.click());
     lightTransferElements.referenceImageInput?.addEventListener('change', (e) => {
         if (e.target.files?.[0]) {
             handleLightTransferImageUpload('reference', e.target.files[0]);
@@ -2175,6 +2174,7 @@ function setupLightTransferEventListeners() {
         }
     });
     lightTransferElements.referenceClearImage?.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         clearLightTransferImage('reference');
     });
@@ -2242,9 +2242,6 @@ function syncLightTransferSourceFromSingleAngle() {
 // ===== Event Listeners Setup =====
 function setupEventListeners() {
     // Image upload - click
-    elements.uploadZone.addEventListener('click', () => {
-        elements.imageInput.click();
-    });
 
     elements.imageInput.addEventListener('change', (e) => {
         if (e.target.files && e.target.files[0]) {
@@ -2272,6 +2269,7 @@ function setupEventListeners() {
 
     // Clear image
     elements.clearImage.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         clearImage();
     });
@@ -2328,8 +2326,6 @@ function setupEventListeners() {
 }
 
 function setupNextSceneEventListeners() {
-    nextSceneElements.uploadZone?.addEventListener('click', () => nextSceneElements.imageInput.click());
-
     nextSceneElements.imageInput?.addEventListener('change', (e) => {
         if (e.target.files?.[0]) {
             handleNextSceneImageUpload(e.target.files[0]);
@@ -2354,6 +2350,7 @@ function setupNextSceneEventListeners() {
     });
 
     nextSceneElements.clearImage?.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         clearNextSceneImage();
     });
@@ -4019,7 +4016,6 @@ async function downloadVideo() {
 // ===== Setup Path Event Listeners =====
 function setupPathEventListeners() {
     // Upload zone click
-    pathElements.uploadZone?.addEventListener('click', () => pathElements.imageInput.click());
     
     pathElements.imageInput?.addEventListener('change', (e) => {
         if (e.target.files?.[0]) handlePathImageUpload(e.target.files[0]);
@@ -4043,6 +4039,7 @@ function setupPathEventListeners() {
     
     // Clear image
     pathElements.clearImage?.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         clearPathImage();
     });
