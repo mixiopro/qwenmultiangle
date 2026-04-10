@@ -74,11 +74,23 @@ let lightTransferState = {
     runToken: 0
 };
 
+// ===== Gaussian Splash State =====
+let gaussianSplashState = {
+    uploadedImage: null,
+    uploadedImageBase64: null,
+    imageUrl: null,
+    sourceImageUrl: null,
+    isGenerating: false,
+    activeRequestId: null,
+    runToken: 0
+};
+
 // ===== DOM Elements =====
 const elements = {};
 const pathElements = {};
 const nextSceneElements = {};
 const lightTransferElements = {};
+const gaussianSplashElements = {};
 
 // ===== Seedance Segment Cache (localStorage) =====
 const AI_SEGMENTS_CACHE_KEY = 'qwenmultiangle_ai_segments_cache_v1';
@@ -268,6 +280,13 @@ function updateLightTransferButton() {
     }
 }
 
+function updateGaussianSplashButton() {
+    const hasImage = gaussianSplashState.uploadedImage !== null || gaussianSplashState.imageUrl !== null;
+    if (gaussianSplashElements.generateBtn) {
+        gaussianSplashElements.generateBtn.disabled = !hasImage || gaussianSplashState.isGenerating;
+    }
+}
+
 function showStatus(message, type = 'info') {
     elements.statusMessage.textContent = message;
     elements.statusMessage.className = `status-message ${type}`;
@@ -312,6 +331,21 @@ function showLightTransferStatus(message, type = 'info') {
 
 function hideLightTransferStatus() {
     lightTransferElements.statusMessage?.classList.add('hidden');
+}
+
+function showGaussianSplashStatus(message, type = 'info') {
+    const el = gaussianSplashElements.statusMessage;
+    if (!el) return;
+    el.textContent = message;
+    el.className = `status-message ${type}`;
+    el.classList.remove('hidden');
+    if (type === 'success') {
+        setTimeout(() => el.classList.add('hidden'), 5000);
+    }
+}
+
+function hideGaussianSplashStatus() {
+    gaussianSplashElements.statusMessage?.classList.add('hidden');
 }
 
 // ===== Logging System =====
@@ -416,6 +450,38 @@ function addLightTransferLog(message, type = 'info') {
 function clearLightTransferLogs() {
     if (lightTransferElements.logsContainer) {
         lightTransferElements.logsContainer.innerHTML = '<div class="log-entry info">Logs cleared.</div>';
+    }
+}
+
+function addGaussianSplashLog(message, type = 'info') {
+    const container = gaussianSplashElements.logsContainer;
+    if (!container) return;
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+
+    const timestamp = document.createElement('span');
+    timestamp.className = 'log-timestamp';
+    timestamp.textContent = `[${getTimestamp()}]`;
+    entry.appendChild(timestamp);
+
+    let messageText = message;
+    if (typeof message === 'object') {
+        try {
+            messageText = JSON.stringify(message, null, 2);
+        } catch (e) {
+            messageText = String(message);
+        }
+    }
+
+    entry.appendChild(document.createTextNode(messageText));
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearGaussianSplashLogs() {
+    if (gaussianSplashElements.logsContainer) {
+        gaussianSplashElements.logsContainer.innerHTML = '<div class="log-entry info">Logs cleared.</div>';
     }
 }
 
@@ -1370,6 +1436,119 @@ function loadNextSceneImageFromUrl(url) {
     img.src = url;
 }
 
+function handleGaussianSplashImageUpload(file) {
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+        showGaussianSplashStatus(validation.error, 'error');
+        addGaussianSplashLog(`Error: ${validation.error}`, 'error');
+        return;
+    }
+
+    addGaussianSplashLog(`Uploading image: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${file.type})`, 'info');
+
+    gaussianSplashState.imageUrl = null;
+    gaussianSplashState.sourceImageUrl = null;
+    if (gaussianSplashElements.imageUrlInput) {
+        gaussianSplashElements.imageUrlInput.value = '';
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        gaussianSplashState.uploadedImage = file;
+        gaussianSplashState.uploadedImageBase64 = e.target.result;
+
+        gaussianSplashElements.previewImage.src = e.target.result;
+        gaussianSplashElements.previewImage.classList.remove('hidden');
+        gaussianSplashElements.uploadPlaceholder.classList.add('hidden');
+        gaussianSplashElements.clearImage.classList.remove('hidden');
+        gaussianSplashElements.uploadZone.classList.add('has-image');
+
+        addGaussianSplashLog(`Image loaded successfully. Base64 size: ${(e.target.result.length / 1024).toFixed(1)} KB`, 'info');
+        updateGaussianSplashButton();
+        hideGaussianSplashStatus();
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearGaussianSplashImage() {
+    gaussianSplashState.uploadedImage = null;
+    gaussianSplashState.uploadedImageBase64 = null;
+    gaussianSplashState.imageUrl = null;
+    gaussianSplashState.sourceImageUrl = null;
+    gaussianSplashState.activeRequestId = null;
+
+    gaussianSplashElements.previewImage.src = '';
+    gaussianSplashElements.previewImage.classList.add('hidden');
+    gaussianSplashElements.uploadPlaceholder.classList.remove('hidden');
+    gaussianSplashElements.clearImage.classList.add('hidden');
+    gaussianSplashElements.uploadZone.classList.remove('has-image');
+    gaussianSplashElements.imageUrlInput.value = '';
+
+    gaussianSplashElements.uploadPlaceholder.innerHTML = `
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p>Drop Gaussian splash camera image here or click to upload</p>
+    `;
+
+    updateGaussianSplashButton();
+}
+
+function loadGaussianSplashImageFromUrl(url) {
+    const validation = validateImageUrl(url);
+    if (!validation.valid) {
+        showGaussianSplashStatus(validation.error, 'error');
+        addGaussianSplashLog(`Error: ${validation.error}`, 'error');
+        return;
+    }
+
+    url = url.trim();
+
+    if (validation.warning) {
+        addGaussianSplashLog(`Warning: ${validation.warning}`, 'warn');
+    }
+
+    addGaussianSplashLog(`Loading image from URL: ${url}`, 'info');
+    showGaussianSplashStatus('Loading image...', 'info');
+
+    gaussianSplashState.uploadedImage = null;
+    gaussianSplashState.uploadedImageBase64 = null;
+    gaussianSplashState.imageUrl = url;
+    gaussianSplashState.sourceImageUrl = url;
+
+    gaussianSplashElements.uploadPlaceholder.innerHTML = `
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <p style="font-size: 11px; word-break: break-all; color: var(--accent);">URL loaded</p>
+        <p style="font-size: 10px; word-break: break-all; opacity: 0.6;">${url.length > 40 ? url.substring(0, 40) + '...' : url}</p>
+    `;
+    gaussianSplashElements.clearImage.classList.remove('hidden');
+    gaussianSplashElements.uploadZone.classList.add('has-image');
+    updateGaussianSplashButton();
+
+    const img = new Image();
+    img.onload = () => {
+        gaussianSplashElements.previewImage.src = url;
+        gaussianSplashElements.previewImage.classList.remove('hidden');
+        gaussianSplashElements.uploadPlaceholder.classList.add('hidden');
+        addGaussianSplashLog('Image preview loaded successfully', 'info');
+        hideGaussianSplashStatus();
+    };
+
+    img.onerror = () => {
+        addGaussianSplashLog('Could not preview image (CORS/network), but URL is set for generation', 'warn');
+        gaussianSplashElements.previewImage.classList.add('hidden');
+        gaussianSplashElements.uploadPlaceholder.classList.remove('hidden');
+        hideGaussianSplashStatus();
+    };
+
+    img.src = url;
+}
+
 function applyLightTransferImageUrlToUi(kind, url) {
     const isSource = kind === 'source';
     const uploadPlaceholder = isSource ? lightTransferElements.sourceUploadPlaceholder : lightTransferElements.referenceUploadPlaceholder;
@@ -1973,6 +2152,68 @@ async function pollLightTransferStatus(requestId, runToken, options = {}) {
     }
 }
 
+async function pollGaussianSplashStatus(requestId, runToken, options = {}) {
+    const pollIntervalMs = options.pollIntervalMs || 2000;
+    const timeoutMs = options.timeoutMs || 180000;
+    const startedAt = Date.now();
+    let lastUiStatus = null;
+
+    while (true) {
+        if (gaussianSplashState.runToken !== runToken) {
+            throw new Error('A newer gaussian-splash run started. Ignoring stale response.');
+        }
+
+        if (Date.now() - startedAt > timeoutMs) {
+            throw new Error('Gaussian Splash generation timed out while waiting for provider completion. Please try again.');
+        }
+
+        const statusResult = await apiRequest(`/api/generate-gaussian-splash/${encodeURIComponent(requestId)}`);
+
+        if (gaussianSplashState.runToken !== runToken) {
+            throw new Error('A newer gaussian-splash run started. Ignoring stale response.');
+        }
+
+        if (statusResult?.status === 'queued') {
+            if (lastUiStatus !== 'queued') {
+                showGaussianSplashStatus('Gaussian Splash queued... waiting for provider.', 'info');
+                addGaussianSplashLog('Queue status: queued', 'info');
+                lastUiStatus = 'queued';
+            }
+            await delay(pollIntervalMs);
+            continue;
+        }
+
+        if (statusResult?.status === 'in_progress') {
+            if (lastUiStatus !== 'in_progress') {
+                showGaussianSplashStatus('Generating Gaussian Splash... in progress.', 'info');
+                addGaussianSplashLog('Queue status: in progress', 'info');
+                lastUiStatus = 'in_progress';
+            }
+            await delay(pollIntervalMs);
+            continue;
+        }
+
+        if (statusResult?.status === 'completed') {
+            const outputImageUrl = statusResult?.imageUrl;
+            if (!outputImageUrl) {
+                addGaussianSplashLog('Error: Completed status returned without an image URL', 'error');
+                throw new Error('No image in completed response. Check logs for details.');
+            }
+            return outputImageUrl;
+        }
+
+        if (statusResult?.status === 'failed') {
+            const providerError = new Error(
+                statusResult?.error || formatError(statusResult?.detail || statusResult)
+            );
+            providerError.body = statusResult;
+            throw providerError;
+        }
+
+        throw new Error(`Unexpected status from gaussian-splash polling: ${statusResult?.status || 'unknown'}`);
+    }
+}
+
 async function generateLightTransfer() {
     const hasSource = !!(lightTransferState.sourceUploadedImage || lightTransferState.sourceImageUrl);
     const hasReference = !!(lightTransferState.referenceUploadedImage || lightTransferState.referenceImageUrl);
@@ -2120,6 +2361,138 @@ async function downloadLightTransferImage() {
     }
 }
 
+async function generateGaussianSplash() {
+    if (!gaussianSplashState.uploadedImage && !gaussianSplashState.imageUrl) {
+        showGaussianSplashStatus('Please upload an image or provide a URL', 'error');
+        addGaussianSplashLog('Error: No image provided', 'error');
+        return;
+    }
+
+    gaussianSplashState.isGenerating = true;
+    gaussianSplashState.runToken += 1;
+    const runToken = gaussianSplashState.runToken;
+    gaussianSplashState.activeRequestId = null;
+    updateGaussianSplashButton();
+
+    gaussianSplashElements.generateBtn.classList.add('generating');
+    gaussianSplashElements.generateBtn.querySelector('.btn-text').textContent = 'Generating...';
+    gaussianSplashElements.generateBtn.querySelector('.btn-loader').classList.remove('hidden');
+    gaussianSplashElements.outputContainer.classList.add('loading');
+    gaussianSplashElements.outputPlaceholder.classList.add('loading');
+
+    hideGaussianSplashStatus();
+    addGaussianSplashLog('Calling backend gaussian-splash API...', 'info');
+    addGaussianSplashLog(`LoRA scale: ${gaussianSplashElements.loraScale?.value || '0.75'}`, 'info');
+
+    try {
+        let imageUrl = gaussianSplashState.imageUrl;
+
+        if (!imageUrl) {
+            showGaussianSplashStatus('Uploading image...', 'info');
+            addGaussianSplashLog('Uploading image via backend...', 'request');
+            imageUrl = await uploadImageToBackend(gaussianSplashState.uploadedImage);
+            gaussianSplashState.sourceImageUrl = imageUrl;
+            addGaussianSplashLog(`Image uploaded: ${imageUrl}`, 'response');
+        } else {
+            gaussianSplashState.sourceImageUrl = imageUrl;
+            addGaussianSplashLog(`Using provided URL: ${imageUrl}`, 'info');
+        }
+
+        showGaussianSplashStatus('Submitting gaussian-splash job...', 'info');
+
+        const submitResult = await apiRequest('/api/generate-gaussian-splash', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                imageUrl,
+                loraScale: gaussianSplashElements.loraScale?.value || '0.75'
+            })
+        });
+
+        const requestId = submitResult?.requestId;
+        if (!requestId) {
+            addGaussianSplashLog('Error: No request ID returned from submit endpoint', 'error');
+            throw new Error('No request ID was returned by submit endpoint.');
+        }
+
+        gaussianSplashState.activeRequestId = requestId;
+        addGaussianSplashLog(`Submitted gaussian-splash job. requestId=${requestId}`, 'request');
+        showGaussianSplashStatus('Gaussian Splash queued... waiting for provider.', 'info');
+
+        const outputImageUrl = await pollGaussianSplashStatus(requestId, runToken, {
+            pollIntervalMs: 2000,
+            timeoutMs: 180000
+        });
+
+        if (gaussianSplashState.runToken !== runToken) {
+            return;
+        }
+
+        gaussianSplashElements.outputImage.src = outputImageUrl;
+        gaussianSplashElements.outputImage.classList.remove('hidden');
+        gaussianSplashElements.outputPlaceholder.classList.add('hidden');
+        gaussianSplashElements.downloadBtn.classList.remove('hidden');
+        gaussianSplashElements.outputContainer.classList.add('success');
+        setTimeout(() => {
+            gaussianSplashElements.outputContainer.classList.remove('success');
+        }, 600);
+
+        addGaussianSplashLog(`Success! Image URL: ${outputImageUrl.substring(0, 80)}...`, 'info');
+        showGaussianSplashStatus('Gaussian Splash generated successfully!', 'success');
+    } catch (error) {
+        if (gaussianSplashState.runToken !== runToken) {
+            return;
+        }
+
+        console.error('Gaussian-splash generation error:', error);
+        const failedPayload = error?.body && error.body.status === 'failed' ? error.body : null;
+        const errorMsg = failedPayload
+            ? (failedPayload.error || formatError(failedPayload.detail || failedPayload))
+            : formatError(error?.body || error);
+        addGaussianSplashLog(`Error: ${errorMsg}`, 'error');
+
+        if (failedPayload?.detail) {
+            addGaussianSplashLog(`Provider detail: ${JSON.stringify(failedPayload.detail, null, 2)}`, 'error');
+        } else if (error?.body && typeof error.body === 'object') {
+            addGaussianSplashLog(`Error body: ${JSON.stringify(error.body, null, 2)}`, 'error');
+        }
+
+        showGaussianSplashStatus(`Error: ${errorMsg}`, 'error');
+    } finally {
+        if (gaussianSplashState.runToken === runToken) {
+            gaussianSplashState.isGenerating = false;
+            gaussianSplashState.activeRequestId = null;
+            updateGaussianSplashButton();
+            gaussianSplashElements.generateBtn.classList.remove('generating');
+            gaussianSplashElements.generateBtn.querySelector('.btn-text').textContent = 'Generate Gaussian Splash';
+            gaussianSplashElements.generateBtn.querySelector('.btn-loader').classList.add('hidden');
+            gaussianSplashElements.outputContainer.classList.remove('loading');
+            gaussianSplashElements.outputPlaceholder.classList.remove('loading');
+        }
+    }
+}
+
+async function downloadGaussianSplashImage() {
+    const imageUrl = gaussianSplashElements.outputImage?.src;
+    if (!imageUrl) return;
+
+    try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mixio-gaussian-splash-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        window.open(imageUrl, '_blank');
+    }
+}
+
 function setupLightTransferEventListeners() {
     lightTransferElements.sourceImageInput?.addEventListener('change', (e) => {
         if (e.target.files?.[0]) {
@@ -2197,6 +2570,56 @@ function setupLightTransferEventListeners() {
     });
 }
 
+function setupGaussianSplashEventListeners() {
+    gaussianSplashElements.imageInput?.addEventListener('change', (e) => {
+        if (e.target.files?.[0]) {
+            handleGaussianSplashImageUpload(e.target.files[0]);
+        }
+    });
+
+    gaussianSplashElements.uploadZone?.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        gaussianSplashElements.uploadZone.classList.add('drag-over');
+    });
+
+    gaussianSplashElements.uploadZone?.addEventListener('dragleave', () => {
+        gaussianSplashElements.uploadZone.classList.remove('drag-over');
+    });
+
+    gaussianSplashElements.uploadZone?.addEventListener('drop', (e) => {
+        e.preventDefault();
+        gaussianSplashElements.uploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files?.[0]) {
+            handleGaussianSplashImageUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    gaussianSplashElements.clearImage?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearGaussianSplashImage();
+    });
+
+    gaussianSplashElements.loadUrlBtn?.addEventListener('click', () => {
+        loadGaussianSplashImageFromUrl(gaussianSplashElements.imageUrlInput.value);
+    });
+
+    gaussianSplashElements.imageUrlInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            loadGaussianSplashImageFromUrl(gaussianSplashElements.imageUrlInput.value);
+        }
+    });
+
+    gaussianSplashElements.loraScale?.addEventListener('change', updateGaussianSplashButton);
+    gaussianSplashElements.generateBtn?.addEventListener('click', generateGaussianSplash);
+    gaussianSplashElements.downloadBtn?.addEventListener('click', downloadGaussianSplashImage);
+    gaussianSplashElements.clearLogsBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearGaussianSplashLogs();
+    });
+}
+
 function syncLightTransferSourceFromSingleAngle() {
     if (lightTransferState.sourceImageUrl || lightTransferState.sourceUploadedImage || lightTransferState.sourceUploadedImageBase64) return;
     if (!state.imageUrl && !state.uploadedImage && !state.uploadedImageBase64) return;
@@ -2237,6 +2660,50 @@ function syncLightTransferSourceFromSingleAngle() {
 
         addLightTransferLog('Synced source image from Single Angle tab (uploaded file)', 'info');
     }
+}
+
+function syncGaussianSplashImageFromSingleAngle() {
+    if (gaussianSplashState.imageUrl || gaussianSplashState.uploadedImage || gaussianSplashState.uploadedImageBase64) return;
+    if (!state.imageUrl && !state.uploadedImage && !state.uploadedImageBase64) return;
+
+    if (state.imageUrl) {
+        gaussianSplashState.imageUrl = state.imageUrl;
+        gaussianSplashState.sourceImageUrl = state.imageUrl;
+        gaussianSplashState.uploadedImage = null;
+        gaussianSplashState.uploadedImageBase64 = null;
+
+        if (gaussianSplashElements.imageUrlInput) gaussianSplashElements.imageUrlInput.value = state.imageUrl;
+        if (gaussianSplashElements.previewImage) {
+            gaussianSplashElements.previewImage.src = state.imageUrl;
+            gaussianSplashElements.previewImage.classList.remove('hidden');
+        }
+        if (gaussianSplashElements.uploadPlaceholder) gaussianSplashElements.uploadPlaceholder.classList.add('hidden');
+        if (gaussianSplashElements.clearImage) gaussianSplashElements.clearImage.classList.remove('hidden');
+        if (gaussianSplashElements.uploadZone) gaussianSplashElements.uploadZone.classList.add('has-image');
+
+        addGaussianSplashLog('Synced image from Single Angle tab (URL)', 'info');
+        return;
+    }
+
+    if (state.uploadedImageBase64 && state.uploadedImage) {
+        gaussianSplashState.uploadedImage = state.uploadedImage;
+        gaussianSplashState.uploadedImageBase64 = state.uploadedImageBase64;
+        gaussianSplashState.imageUrl = null;
+        gaussianSplashState.sourceImageUrl = null;
+
+        if (gaussianSplashElements.imageUrlInput) gaussianSplashElements.imageUrlInput.value = '';
+        if (gaussianSplashElements.previewImage) {
+            gaussianSplashElements.previewImage.src = state.uploadedImageBase64;
+            gaussianSplashElements.previewImage.classList.remove('hidden');
+        }
+        if (gaussianSplashElements.uploadPlaceholder) gaussianSplashElements.uploadPlaceholder.classList.add('hidden');
+        if (gaussianSplashElements.clearImage) gaussianSplashElements.clearImage.classList.remove('hidden');
+        if (gaussianSplashElements.uploadZone) gaussianSplashElements.uploadZone.classList.add('has-image');
+
+        addGaussianSplashLog('Synced image from Single Angle tab (uploaded file)', 'info');
+    }
+
+    updateGaussianSplashButton();
 }
 
 // ===== Event Listeners Setup =====
@@ -2421,6 +2888,13 @@ function setupTabSwitching() {
                 setTimeout(() => {
                     syncLightTransferSourceFromSingleAngle();
                     updateLightTransferButton();
+                }, 50);
+            }
+
+            if (targetTab === 'gaussian-splash') {
+                setTimeout(() => {
+                    syncGaussianSplashImageFromSingleAngle();
+                    updateGaussianSplashButton();
                 }, 50);
             }
         });
@@ -4213,6 +4687,24 @@ function init() {
     lightTransferElements.logsContainer = document.getElementById('light-transfer-logs-container');
     lightTransferElements.clearLogsBtn = document.getElementById('light-transfer-clear-logs');
 
+    // Cache DOM elements - Gaussian Splash Tab
+    gaussianSplashElements.uploadZone = document.getElementById('gaussian-splash-upload-zone');
+    gaussianSplashElements.imageInput = document.getElementById('gaussian-splash-image-input');
+    gaussianSplashElements.uploadPlaceholder = document.getElementById('gaussian-splash-upload-placeholder');
+    gaussianSplashElements.previewImage = document.getElementById('gaussian-splash-preview-image');
+    gaussianSplashElements.clearImage = document.getElementById('gaussian-splash-clear-image');
+    gaussianSplashElements.imageUrlInput = document.getElementById('gaussian-splash-image-url-input');
+    gaussianSplashElements.loadUrlBtn = document.getElementById('gaussian-splash-load-url-btn');
+    gaussianSplashElements.loraScale = document.getElementById('gaussian-splash-lora-scale');
+    gaussianSplashElements.generateBtn = document.getElementById('gaussian-splash-generate-btn');
+    gaussianSplashElements.outputContainer = document.getElementById('gaussian-splash-output-container');
+    gaussianSplashElements.outputPlaceholder = document.getElementById('gaussian-splash-output-placeholder');
+    gaussianSplashElements.outputImage = document.getElementById('gaussian-splash-output-image');
+    gaussianSplashElements.downloadBtn = document.getElementById('gaussian-splash-download-btn');
+    gaussianSplashElements.statusMessage = document.getElementById('gaussian-splash-status-message');
+    gaussianSplashElements.logsContainer = document.getElementById('gaussian-splash-logs-container');
+    gaussianSplashElements.clearLogsBtn = document.getElementById('gaussian-splash-clear-logs');
+
     // Initialize Single Angle
     setupEventListeners();
     initThreeJS();
@@ -4236,6 +4728,10 @@ function init() {
     // Initialize Light Transfer
     setupLightTransferEventListeners();
     updateLightTransferButton();
+
+    // Initialize Gaussian Splash
+    setupGaussianSplashEventListeners();
+    updateGaussianSplashButton();
 }
 
 // Start when DOM is ready
