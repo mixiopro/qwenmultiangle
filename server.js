@@ -90,6 +90,30 @@ function resolveLightTransferLoraPath() {
     return envPath || DEFAULT_LIGHT_TRANSFER_LORA_PATH;
 }
 
+function redactImageUrlMarker(url) {
+    if (!url || typeof url !== 'string') {
+        return 'missing';
+    }
+
+    const trimmed = url.trim();
+    if (!trimmed) {
+        return 'empty';
+    }
+
+    try {
+        const parsed = new URL(trimmed);
+        const fileName = parsed.pathname.split('/').filter(Boolean).pop() || 'file';
+        return `${parsed.hostname}/${fileName.slice(0, 24)}`;
+    } catch (_) {
+        const compact = trimmed.replace(/\s+/g, '');
+        return compact.slice(0, 28);
+    }
+}
+
+function buildLightTransferImageUrls(sourceImageUrl, referenceImageUrl) {
+    return [sourceImageUrl, referenceImageUrl];
+}
+
 function normalizeGaussianSplashLoraScale(value) {
     const parsedValue = Number(value);
     if (!Number.isFinite(parsedValue)) {
@@ -257,10 +281,18 @@ app.post('/api/generate-light-transfer', async (req, res) => {
             return res.status(400).json({ error: 'referenceImageUrl is required.' });
         }
 
+        const imageUrls = buildLightTransferImageUrls(sourceImageUrl, referenceImageUrl);
+        const submitDebug = {
+            inputOrder: ['source', 'reference'],
+            sourceMarker: redactImageUrlMarker(sourceImageUrl),
+            referenceMarker: redactImageUrlMarker(referenceImageUrl)
+        };
+        console.info('[light-transfer] submit payload mapping', submitDebug);
+
         const queueRequest = await fal.queue.submit(LIGHT_TRANSFER_MODEL_ID, {
             input: {
                 prompt: LIGHT_TRANSFER_FIXED_PROMPT,
-                image_urls: [sourceImageUrl, referenceImageUrl],
+                image_urls: imageUrls,
                 loras: [
                     {
                         path: resolveLightTransferLoraPath(),
@@ -278,7 +310,10 @@ app.post('/api/generate-light-transfer', async (req, res) => {
         return res.status(202).json({
             requestId,
             status: 'queued',
-            pollUrl: `/api/generate-light-transfer/${requestId}`
+            pollUrl: `/api/generate-light-transfer/${requestId}`,
+            inputOrder: submitDebug.inputOrder,
+            sourceMarker: submitDebug.sourceMarker,
+            referenceMarker: submitDebug.referenceMarker
         });
     } catch (error) {
         return sendApiError(res, error);

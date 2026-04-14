@@ -2285,6 +2285,15 @@ async function generateLightTransfer() {
 
         lightTransferState.activeRequestId = requestId;
         addLightTransferLog(`Submitted light-transfer job. requestId=${requestId}`, 'request');
+        if (Array.isArray(submitResult?.inputOrder)) {
+            addLightTransferLog(`Input order confirmed by backend: ${submitResult.inputOrder.join(' -> ')}`, 'info');
+        }
+        if (submitResult?.sourceMarker || submitResult?.referenceMarker) {
+            addLightTransferLog(
+                `Input markers: source=${submitResult?.sourceMarker || 'n/a'}, reference=${submitResult?.referenceMarker || 'n/a'}`,
+                'info'
+            );
+        }
         showLightTransferStatus('Light transfer queued... waiting for provider.', 'info');
 
         const outputImageUrl = await pollLightTransferStatus(requestId, runToken, {
