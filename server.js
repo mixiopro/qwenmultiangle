@@ -114,6 +114,27 @@ function buildLightTransferImageUrls(sourceImageUrl, referenceImageUrl) {
     return [sourceImageUrl, referenceImageUrl];
 }
 
+function normalizeImageSize(imageSize) {
+    if (!imageSize || typeof imageSize !== 'object') {
+        return null;
+    }
+
+    const width = Number(imageSize.width);
+    const height = Number(imageSize.height);
+
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        return null;
+    }
+
+    const sanitizedWidth = Math.max(8, Math.floor(width));
+    const sanitizedHeight = Math.max(8, Math.floor(height));
+
+    return {
+        width: Math.max(8, Math.floor(sanitizedWidth / 8) * 8),
+        height: Math.max(8, Math.floor(sanitizedHeight / 8) * 8)
+    };
+}
+
 function normalizeGaussianSplashLoraScale(value) {
     const parsedValue = Number(value);
     if (!Number.isFinite(parsedValue)) {
@@ -271,7 +292,7 @@ app.get('/api/generate-next-scene/:requestId', async (req, res) => {
 
 app.post('/api/generate-light-transfer', async (req, res) => {
     try {
-        const { sourceImageUrl, referenceImageUrl, loraScale } = req.body || {};
+        const { sourceImageUrl, referenceImageUrl, imageSize, loraScale } = req.body || {};
 
         if (!sourceImageUrl) {
             return res.status(400).json({ error: 'sourceImageUrl is required.' });
@@ -282,17 +303,19 @@ app.post('/api/generate-light-transfer', async (req, res) => {
         }
 
         const imageUrls = buildLightTransferImageUrls(sourceImageUrl, referenceImageUrl);
+        const normalizedImageSize = normalizeImageSize(imageSize);
         const submitDebug = {
             inputOrder: ['source', 'reference'],
             sourceMarker: redactImageUrlMarker(sourceImageUrl),
-            referenceMarker: redactImageUrlMarker(referenceImageUrl)
+            referenceMarker: redactImageUrlMarker(referenceImageUrl),
+            imageSize: normalizedImageSize || null
         };
         console.info('[light-transfer] submit payload mapping', submitDebug);
-
         const queueRequest = await fal.queue.submit(LIGHT_TRANSFER_MODEL_ID, {
             input: {
                 prompt: LIGHT_TRANSFER_FIXED_PROMPT,
                 image_urls: imageUrls,
+                ...(normalizedImageSize ? { image_size: normalizedImageSize } : {}),
                 loras: [
                     {
                         path: resolveLightTransferLoraPath(),
@@ -313,7 +336,8 @@ app.post('/api/generate-light-transfer', async (req, res) => {
             pollUrl: `/api/generate-light-transfer/${requestId}`,
             inputOrder: submitDebug.inputOrder,
             sourceMarker: submitDebug.sourceMarker,
-            referenceMarker: submitDebug.referenceMarker
+            referenceMarker: submitDebug.referenceMarker,
+            imageSize: submitDebug.imageSize
         });
     } catch (error) {
         return sendApiError(res, error);

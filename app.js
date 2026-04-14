@@ -69,6 +69,7 @@ let lightTransferState = {
     referenceUploadedImageBase64: null,
     referenceImageUrl: null,
     referenceResolvedImageUrl: null,
+    sourceImageSize: null,
     isGenerating: false,
     activeRequestId: null,
     runToken: 0
@@ -1139,6 +1140,63 @@ const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
+function fitDimensionsToMaxEdge(width, height, maxEdge = 1024) {
+    if (!width || !height) {
+        return { width: maxEdge, height: maxEdge };
+    }
+
+    if (width > height) {
+        const nextWidth = maxEdge;
+        const aspectRatio = height / width;
+        const nextHeight = Math.max(8, Math.floor(nextWidth * aspectRatio / 8) * 8);
+        return { width: Math.max(8, Math.floor(nextWidth / 8) * 8), height: nextHeight };
+    }
+
+    const nextHeight = maxEdge;
+    const aspectRatio = width / height;
+    const nextWidth = Math.max(8, Math.floor(nextHeight * aspectRatio / 8) * 8);
+    return { width: nextWidth, height: Math.max(8, Math.floor(nextHeight / 8) * 8) };
+}
+
+function getImageSizeFromFile(file, fallbackSize = { width: 1024, height: 1024 }) {
+    return new Promise((resolve) => {
+        if (!file) {
+            resolve(fallbackSize);
+            return;
+        }
+
+        const objectUrl = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            URL.revokeObjectURL(objectUrl);
+            resolve(fitDimensionsToMaxEdge(img.naturalWidth, img.naturalHeight));
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            resolve(fallbackSize);
+        };
+        img.src = objectUrl;
+    });
+}
+
+function getImageSizeFromUrl(url, fallbackSize = { width: 1024, height: 1024 }) {
+    return new Promise((resolve) => {
+        if (!url || !url.trim()) {
+            resolve(fallbackSize);
+            return;
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            resolve(fitDimensionsToMaxEdge(img.naturalWidth, img.naturalHeight));
+        };
+        img.onerror = () => {
+            resolve(fallbackSize);
+        };
+        img.src = url.trim();
+    });
+}
+
 function validateImageFile(file) {
     if (!file) {
         return { valid: false, error: 'No file provided' };
@@ -1654,6 +1712,7 @@ function clearLightTransferImage(kind) {
         lightTransferState.sourceUploadedImageBase64 = null;
         lightTransferState.sourceImageUrl = null;
         lightTransferState.sourceResolvedImageUrl = null;
+        lightTransferState.sourceImageSize = null;
     } else {
         lightTransferState.referenceUploadedImage = null;
         lightTransferState.referenceUploadedImageBase64 = null;
@@ -1706,6 +1765,7 @@ function loadLightTransferImageFromUrl(kind, url) {
         lightTransferState.sourceUploadedImageBase64 = null;
         lightTransferState.sourceImageUrl = url;
         lightTransferState.sourceResolvedImageUrl = url;
+        lightTransferState.sourceImageSize = null;
     } else {
         lightTransferState.referenceUploadedImage = null;
         lightTransferState.referenceUploadedImageBase64 = null;
@@ -2242,6 +2302,33 @@ async function generateLightTransfer() {
     try {
         let sourceImageUrl = lightTransferState.sourceImageUrl;
         let referenceImageUrl = lightTransferState.referenceImageUrl;
+        let sourceImageSize = null;
+
+        if (lightTransferState.sourceUploadedImage) {
+            showLightTransferStatus('Reading source image dimensions...', 'info');
+            sourceImageSize = await getImageSizeFromFile(lightTransferState.sourceUploadedImage);
+            lightTransferState.sourceImageSize = sourceImageSize;
+            addLightTransferLog(`Source image dimensions mapped from upload: ${sourceImageSize.width}x${sourceImageSize.height}`, 'info');
+        } else if (lightTransferState.sourceImageUrl) {
+            if (lightTransferState.sourceImageSize) {
+                sourceImageSize = lightTransferState.sourceImageSize;
+                addLightTransferLog(`Using cached source image size: ${sourceImageSize.width}x${sourceImageSize.height}`, 'info');
+            } else {
+                showLightTransferStatus('Reading source image dimensions from URL...', 'info');
+                sourceImageSize = await getImageSizeFromUrl(lightTransferState.sourceImageUrl);
+                lightTransferState.sourceImageSize = sourceImageSize;
+                addLightTransferLog(`Source image dimensions mapped from URL: ${sourceImageSize.width}x${sourceImageSize.height}`, 'info');
+            }
+        } else if (lightTransferState.sourceResolvedImageUrl) {
+            showLightTransferStatus('Reading source image dimensions from URL...', 'info');
+            sourceImageSize = await getImageSizeFromUrl(lightTransferState.sourceResolvedImageUrl);
+            lightTransferState.sourceImageSize = sourceImageSize;
+            addLightTransferLog(`Source image dimensions mapped from URL: ${sourceImageSize.width}x${sourceImageSize.height}`, 'info');
+        } else {
+            sourceImageSize = { width: 1024, height: 1024 };
+            lightTransferState.sourceImageSize = sourceImageSize;
+            addLightTransferLog('Source image dimensions defaulted to 1024x1024', 'info');
+        }
 
         if (!sourceImageUrl) {
             showLightTransferStatus('Uploading source image...', 'info');
@@ -2252,6 +2339,11 @@ async function generateLightTransfer() {
         } else {
             lightTransferState.sourceResolvedImageUrl = sourceImageUrl;
             addLightTransferLog(`Using source URL: ${sourceImageUrl}`, 'info');
+        }
+
+        if (lightTransferState.referenceUploadedImage) {
+            const referenceImageSize = await getImageSizeFromFile(lightTransferState.referenceUploadedImage);
+            addLightTransferLog(`Reference image dimensions mapped from upload: ${referenceImageSize.width}x${referenceImageSize.height}`, 'info');
         }
 
         if (!referenceImageUrl) {
@@ -2273,6 +2365,7 @@ async function generateLightTransfer() {
             body: JSON.stringify({
                 sourceImageUrl,
                 referenceImageUrl,
+                imageSize: sourceImageSize,
                 loraScale: lightTransferElements.loraScale?.value || '0.75'
             })
         });
@@ -2291,6 +2384,12 @@ async function generateLightTransfer() {
         if (submitResult?.sourceMarker || submitResult?.referenceMarker) {
             addLightTransferLog(
                 `Input markers: source=${submitResult?.sourceMarker || 'n/a'}, reference=${submitResult?.referenceMarker || 'n/a'}`,
+                'info'
+            );
+        }
+        if (submitResult?.imageSize?.width && submitResult?.imageSize?.height) {
+            addLightTransferLog(
+                `Output image size mapped from source: ${submitResult.imageSize.width}x${submitResult.imageSize.height}`,
                 'info'
             );
         }

@@ -64,6 +64,7 @@ The app includes a dedicated **Light-Transfer** tab powered by fal's `fal-ai/qwe
 
 - Input 1 (`image_urls[0]`): source image to be relit
 - Input 2 (`image_urls[1]`): lighting reference image
+- Output size is sent as `image_size` from the source image, matching the Gradio demo’s max-edge-1024, aspect-ratio-preserving behavior
 - Fixed prompt is applied server-side:
 
 ```text
