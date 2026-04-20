@@ -59,20 +59,6 @@
                 </svg>
                 Relight
             </button>
-            <button class="tab-btn" data-tab="gaussian-splash">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 2v5"/>
-                    <path d="M12 17v5"/>
-                    <path d="M4.93 4.93l3.54 3.54"/>
-                    <path d="M15.53 15.53l3.54 3.54"/>
-                    <path d="M2 12h5"/>
-                    <path d="M17 12h5"/>
-                    <path d="M4.93 19.07l3.54-3.54"/>
-                    <path d="M15.53 8.47l3.54-3.54"/>
-                    <circle cx="12" cy="12" r="3"/>
-                </svg>
-                Gaussian-Splash
-            </button>
             <button class="tab-btn" data-tab="camera-motion" style="display: none;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 7l-9 5-9-5 9-5 9 5z"/>
@@ -662,102 +648,6 @@
                             </summary>
                             <div id="relight-logs-container" class="logs-container">
                                 <div class="log-entry info">Relight mode ready. Add an image and enter a relight instruction.</div>
-                            </div>
-                        </details>
-                    </section>
-                </main>
-            </div>
-
-            <!-- ========== GAUSSIAN SPLASH TAB ========== -->
-            <div class="tab-panel" id="gaussian-splash-panel">
-                <main class="main-content">
-                    <section class="left-panel">
-                        <div class="panel-card upload-card">
-                            <h3 class="card-title">Input Image</h3>
-                            <label class="upload-zone" id="gaussian-splash-upload-zone" for="gaussian-splash-image-input">
-                                <input type="file" id="gaussian-splash-image-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" hidden>
-                                <div class="upload-placeholder" id="gaussian-splash-upload-placeholder">
-                                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                        <polyline points="17 8 12 3 7 8"/>
-                                        <line x1="12" y1="3" x2="12" y2="15"/>
-                                    </svg>
-                                    <p>Drop Gaussian splash camera image here or click to upload</p>
-                                </div>
-                                <img id="gaussian-splash-preview-image" class="preview-image hidden" alt="Gaussian splash preview">
-                                <button id="gaussian-splash-clear-image" class="clear-btn hidden" type="button">×</button>
-                            </label>
-                            <div class="url-input-section">
-                                <div class="url-divider"><span>or paste URL</span></div>
-                                <div class="url-input-wrapper">
-                                    <input type="text" id="gaussian-splash-image-url-input" placeholder="https://example.com/image.jpg" autocomplete="off">
-                                    <button id="gaussian-splash-load-url-btn" class="load-url-btn">Load</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="panel-card">
-                            <h3 class="card-title">Gaussian-Splash Settings</h3>
-                            <p class="card-subtitle">Fixed prompt is applied server-side using the Gaussian-Splash README instruction.</p>
-                            <div class="setting-group">
-                                <label for="gaussian-splash-fixed-prompt">Fixed Prompt</label>
-                                <textarea id="gaussian-splash-fixed-prompt" rows="3" readonly>高斯泼溅,参考图2的场景图，修复图1的场景图透视并修复空白区域</textarea>
-                            </div>
-                            <div class="setting-group">
-                                <label for="gaussian-splash-lora-scale">LoRA Scale</label>
-                                <select id="gaussian-splash-lora-scale">
-                                    <option value="0.5">0.5</option>
-                                    <option value="0.75" selected>0.75 (Recommended)</option>
-                                    <option value="1.0">1.0</option>
-                                    <option value="1.25">1.25</option>
-                                </select>
-                                <p class="setting-help">LoRA path is managed on backend (env override supported).</p>
-                            </div>
-                        </div>
-
-                        <button id="gaussian-splash-generate-btn" class="generate-btn" disabled>
-                            <span class="btn-text">Generate Gaussian Splash</span>
-                            <span class="btn-loader hidden">
-                                <svg class="spinner" viewBox="0 0 24 24">
-                                    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4" stroke-dashoffset="10"/>
-                                </svg>
-                            </span>
-                        </button>
-                    </section>
-
-                    <section class="right-panel">
-                        <div class="panel-card output-card">
-                            <h3 class="card-title">Output</h3>
-                            <div class="output-container" id="gaussian-splash-output-container">
-                                <div class="output-placeholder" id="gaussian-splash-output-placeholder">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                        <circle cx="8.5" cy="8.5" r="1.5"/>
-                                        <polyline points="21 15 16 10 5 21"/>
-                                    </svg>
-                                    <p>Generated Gaussian-Splash output will appear here</p>
-                                </div>
-                                <img id="gaussian-splash-output-image" class="output-image hidden" alt="Gaussian splash output">
-                            </div>
-                            <button id="gaussian-splash-download-btn" class="download-btn hidden">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                    <polyline points="7 10 12 15 17 10"/>
-                                    <line x1="12" y1="15" x2="12" y2="3"/>
-                                </svg>
-                                Download
-                            </button>
-                        </div>
-
-                        <div id="gaussian-splash-status-message" class="status-message hidden"></div>
-
-                        <details class="logs-panel" open>
-                            <summary class="logs-header">
-                                <span>🔧 Debug Logs</span>
-                                <button id="gaussian-splash-clear-logs" class="clear-logs-btn">Clear</button>
-                            </summary>
-                            <div id="gaussian-splash-logs-container" class="logs-container">
-                                <div class="log-entry info">Gaussian-Splash mode ready. Add a source image.</div>
                             </div>
                         </details>
                     </section>

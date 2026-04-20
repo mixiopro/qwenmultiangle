@@ -19,9 +19,6 @@ const NEXT_SCENE_MODEL_ID = 'fal-ai/qwen-image-edit-plus-lora-gallery/next-scene
 const LIGHT_TRANSFER_MODEL_ID = 'fal-ai/qwen-image-edit-2509-lora';
 const LIGHT_TRANSFER_FIXED_PROMPT = '参考色调，移除图1原有的光照并参考图2的光照和色调对图1重新照明';
 const DEFAULT_LIGHT_TRANSFER_LORA_PATH = 'https://huggingface.co/dx8152/Qwen-Edit-2509-Light-Migration/resolve/main/%E5%8F%82%E8%80%83%E8%89%B2%E8%B0%83.safetensors';
-const GAUSSIAN_SPLASH_MODEL_ID = 'fal-ai/qwen-image-edit-2511/lora';
-const GAUSSIAN_SPLASH_FIXED_PROMPT = '高斯泼溅,参考图2的场景图，修复图1的场景图透视并修复空白区域';
-const DEFAULT_GAUSSIAN_SPLASH_LORA_PATH = 'https://huggingface.co/dx8152/Qwen-Image-Edit-2511-Gaussian-Splash/resolve/main/%E9%AB%98%E6%96%AF%E6%B3%BC%E6%BA%85-Sharp.safetensors';
 const RELIGHT_MODEL_ID = 'fal-ai/qwen-image-edit-2509-lora';
 const RELIGHT_TRIGGER_WORD = '重新照明';
 const DEFAULT_RELIGHT_LORA_PATH = 'https://huggingface.co/dx8152/Qwen-Image-Edit-2509-Relight/resolve/main/Qwen-Edit-Relight.safetensors';
@@ -169,23 +166,6 @@ function normalizeImageSize(imageSize) {
         width: Math.max(8, Math.floor(sanitizedWidth / 8) * 8),
         height: Math.max(8, Math.floor(sanitizedHeight / 8) * 8)
     };
-}
-
-function normalizeGaussianSplashLoraScale(value) {
-    const parsedValue = Number(value);
-    if (!Number.isFinite(parsedValue)) {
-        return 0.75;
-    }
-
-    return Math.min(4, Math.max(0, parsedValue));
-}
-
-function resolveGaussianSplashLoraPath() {
-    const envPath = typeof process.env.QWEN_GAUSSIAN_SPLASH_LORA_PATH === 'string'
-        ? process.env.QWEN_GAUSSIAN_SPLASH_LORA_PATH.trim()
-        : '';
-
-    return envPath || DEFAULT_GAUSSIAN_SPLASH_LORA_PATH;
 }
 
 function normalizeRelightLoraScale(value) {
@@ -610,103 +590,6 @@ app.get('/api/generate-light-transfer/:requestId', async (req, res) => {
         return res.json({
             status: 'failed',
             error: typeof fallbackMessage === 'string' ? fallbackMessage : 'Light transfer generation failed.',
-            detail: queueStatus || null
-        });
-    } catch (error) {
-        return sendApiError(res, error);
-    }
-});
-
-app.post('/api/generate-gaussian-splash', async (req, res) => {
-    try {
-        const { imageUrl, loraScale } = req.body || {};
-
-        if (!imageUrl) {
-            return res.status(400).json({ error: 'imageUrl is required.' });
-        }
-
-        const queueRequest = await fal.queue.submit(GAUSSIAN_SPLASH_MODEL_ID, {
-            input: {
-                prompt: GAUSSIAN_SPLASH_FIXED_PROMPT,
-                image_urls: [imageUrl],
-                loras: [
-                    {
-                        path: resolveGaussianSplashLoraPath(),
-                        scale: normalizeGaussianSplashLoraScale(loraScale)
-                    }
-                ]
-            }
-        });
-
-        const requestId = queueRequest?.request_id || queueRequest?.requestId;
-        if (!requestId) {
-            return res.status(502).json({ error: 'No request ID was returned by the provider.' });
-        }
-
-        return res.status(202).json({
-            requestId,
-            status: 'queued',
-            pollUrl: `/api/generate-gaussian-splash/${requestId}`
-        });
-    } catch (error) {
-        return sendApiError(res, error);
-    }
-});
-
-app.get('/api/generate-gaussian-splash/:requestId', async (req, res) => {
-    try {
-        const requestId = req.params?.requestId;
-        if (!requestId) {
-            return res.status(400).json({ error: 'requestId is required.' });
-        }
-
-        const queueStatus = await fal.queue.status(GAUSSIAN_SPLASH_MODEL_ID, {
-            requestId,
-            logs: false
-        });
-
-        if (queueStatus?.status === 'IN_QUEUE') {
-            return res.json({ status: 'queued' });
-        }
-
-        if (queueStatus?.status === 'IN_PROGRESS') {
-            return res.json({ status: 'in_progress' });
-        }
-
-        if (queueStatus?.status === 'COMPLETED') {
-            try {
-                const result = await fal.queue.result(GAUSSIAN_SPLASH_MODEL_ID, { requestId });
-                const outputUrl = normalizeImageResult(result);
-                if (!outputUrl) {
-                    return res.json({
-                        status: 'failed',
-                        error: 'No image URL was returned by the provider.',
-                        detail: result?.data || result || null
-                    });
-                }
-
-                return res.json({ status: 'completed', imageUrl: outputUrl });
-            } catch (error) {
-                const statusCode = error?.status || error?.response?.status || 500;
-                const body = error?.body || error?.response?.data || null;
-                const message = body?.detail || body?.message || error?.message || 'Gaussian Splash generation failed.';
-
-                if ([408, 429, 500, 502, 503, 504].includes(statusCode)) {
-                    return sendApiError(res, error);
-                }
-
-                return res.json({
-                    status: 'failed',
-                    error: message,
-                    detail: body
-                });
-            }
-        }
-
-        const fallbackMessage = queueStatus?.detail || queueStatus?.message || `Unexpected queue status: ${queueStatus?.status || 'unknown'}`;
-        return res.json({
-            status: 'failed',
-            error: typeof fallbackMessage === 'string' ? fallbackMessage : 'Gaussian Splash generation failed.',
             detail: queueStatus || null
         });
     } catch (error) {
