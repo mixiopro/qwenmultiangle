@@ -2533,8 +2533,23 @@ async function generateRelight() {
             addRelightLog('Error: No request ID returned from submit endpoint', 'error');
             throw new Error('No request ID was returned by submit endpoint.');
         }
+        if (submitResult?.usedImageContext !== undefined) {
+            addRelightLog(
+                `Prompt enhancer image context: ${submitResult.usedImageContext ? 'used' : 'not used'}`,
+                submitResult.usedImageContext ? 'info' : 'warn'
+            );
+        }
+        if (submitResult?.usedFallback) {
+            addRelightLog(
+                `Prompt enhancer fallback: ${submitResult.fallbackReason || 'raw user instruction used'}`,
+                'warn'
+            );
+        }
+        if (submitResult?.enhancedPrompt) {
+            addRelightLog(`Enhanced Chinese prompt: ${submitResult.enhancedPrompt}`, 'info');
+        }
         if (submitResult?.prompt) {
-            addRelightLog(`Chinese prompt: ${submitResult.prompt}`, 'info');
+            addRelightLog(`Final Chinese prompt: ${submitResult.prompt}`, 'info');
         }
 
         relightState.activeRequestId = requestId;

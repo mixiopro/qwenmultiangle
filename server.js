@@ -7,7 +7,7 @@ let GoogleGenAI = null;
 try {
     ({ GoogleGenAI } = require('@google/genai'));
 } catch (error) {
-    console.warn('[relight] @google/genai is not installed yet. Relight prompt enhancement will fall back to the raw user instruction until it is added.');
+    console.warn('[relight] @google/genai is not installed yet. Relight prompt enhancement will be unavailable until it is added.');
 }
 
 const app = express();
@@ -27,9 +27,10 @@ const GEMINI_API_KEY = (
     process.env.GEMINI_API_KEY ||
     'AIzaSyC4FRCjh4TmbOUBCc1Ud06PIxZMDGiFqRM'
 ).trim();
-const RELIGHT_PROMPT_ENHANCER_GUIDELINES = [
+const RELIGHT_PROMPT_ENHANCER_SYSTEM_INSTRUCTION = [
     'You rewrite relighting instructions for the Qwen Image Edit 2509 Relight LoRA.',
     'Rewrite the user input into one short, direct Chinese prompt.',
+    'If an image is provided, inspect it for lighting context only and keep the rewrite aligned with the visible lighting situation.',
     'Keep the user intent exactly. Do not add new subjects, scenes, objects, style changes, or details that were not requested.',
     'Keep only lighting-related information such as light source, direction, softness, color temperature, mood, shadows, and reflections.',
     'Use a concise command-like tone similar to "使用窗帘透光（柔和漫射）的光线对图片进行重新照明".',
@@ -41,13 +42,11 @@ const RELIGHT_PROMPT_ENHANCER_GUIDELINES = [
 const geminiClient = GoogleGenAI && GEMINI_API_KEY
     ? new GoogleGenAI({ apiKey: GEMINI_API_KEY })
     : null;
-const GOOGLE_TRANSLATE_API_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
-const GOOGLE_TRANSLATE_API_KEY = (
-    process.env.GOOGLE_TRANSLATE_API_KEY ||
-    process.env.GOOGLE_CLOUD_TRANSLATE_API_KEY ||
-    process.env.GOOGLE_TRANSLATE_KEY ||
-    'AIzaSyD5mVr-yl_WRmw3xcJJYuXINA19KXOtyzo'
-).trim();
+const DEFAULT_RELIGHT_IMAGE_MIME_TYPE = 'image/jpeg';
+
+if (!GEMINI_API_KEY) {
+    console.warn('[relight] GEMINI_API_KEY is not set. English relight instructions cannot be enhanced into Chinese.');
+}
 const VIDEO_MODEL_BY_KEY = {
     seedance: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video',
     kling26: 'fal-ai/kling-video/v2.6/standard/image-to-video',
@@ -202,6 +201,10 @@ function buildRelightPrompt(prompt) {
     return `${RELIGHT_TRIGGER_WORD},${normalizedPrompt}`;
 }
 
+function containsLatinLetters(text) {
+    return typeof text === 'string' && /[A-Za-z]/.test(text);
+}
+
 function normalizePromptEnhancerOutput(text) {
     if (typeof text !== 'string') {
         return '';
@@ -219,96 +222,104 @@ function normalizePromptEnhancerOutput(text) {
         .trim();
 }
 
-function decodeHtmlEntities(text) {
-    if (typeof text !== 'string') {
-        return '';
+function inferRelightImageMimeType(imageUrl, contentType) {
+    const headerMimeType = typeof contentType === 'string'
+        ? contentType.split(';')[0].trim().toLowerCase()
+        : '';
+    if (headerMimeType.startsWith('image/')) {
+        if (headerMimeType === 'image/jpg') {
+            return 'image/jpeg';
+        }
+        return headerMimeType;
     }
 
-    return text
-        .replace(/&#(\d+);/g, (_, code) => {
-            const cp = Number(code);
-            if (!Number.isFinite(cp)) {
-                return '';
-            }
-            try {
-                return String.fromCodePoint(cp);
-            } catch (_) {
-                return '';
-            }
-        })
-        .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => {
-            const cp = Number.parseInt(code, 16);
-            if (!Number.isFinite(cp)) {
-                return '';
-            }
-            try {
-                return String.fromCodePoint(cp);
-            } catch (_) {
-                return '';
-            }
-        })
-        .replace(/&quot;/g, '"')
-        .replace(/&#039;/g, "'")
-        .replace(/&apos;/g, "'")
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>');
+    const urlText = typeof imageUrl === 'string' ? imageUrl.trim().toLowerCase() : '';
+    if (urlText.startsWith('data:image/')) {
+        const match = urlText.match(/^data:([^;]+);base64,/);
+        if (match?.[1]) {
+            return match[1];
+        }
+    }
+
+    if (urlText.endsWith('.png')) return 'image/png';
+    if (urlText.endsWith('.webp')) return 'image/webp';
+    if (urlText.endsWith('.gif')) return 'image/gif';
+    if (urlText.endsWith('.jpg') || urlText.endsWith('.jpeg')) return 'image/jpeg';
+
+    return DEFAULT_RELIGHT_IMAGE_MIME_TYPE;
 }
 
-async function translatePromptToChinese(prompt) {
-    const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
-    if (!trimmedPrompt) {
-        return '';
+function parseDataUrlImagePart(imageUrl) {
+    if (typeof imageUrl !== 'string') {
+        return null;
     }
 
-    if (!GOOGLE_TRANSLATE_API_KEY) {
-        return trimmedPrompt;
+    const match = imageUrl.trim().match(/^data:([^;]+);base64,(.+)$/i);
+    if (!match) {
+        return null;
     }
 
-    try {
-        const response = await fetch(`${GOOGLE_TRANSLATE_API_ENDPOINT}?key=${encodeURIComponent(GOOGLE_TRANSLATE_API_KEY)}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
-            },
-            body: new URLSearchParams({
-                q: trimmedPrompt,
-                target: 'zh',
-                format: 'text'
-            })
-        });
-
-        let payload;
-        try {
-            payload = await response.json();
-        } catch (error) {
-            throw new Error(`Unable to parse translation response: ${error.message}`);
+    return {
+        inlineData: {
+            mimeType: match[1] === 'image/jpg' ? 'image/jpeg' : match[1],
+            data: match[2]
         }
-
-        if (!response.ok) {
-            throw new Error(payload?.error?.message || `Translate API request failed with status ${response.status}`);
-        }
-
-        const translated = payload?.data?.translations?.[0]?.translatedText;
-        if (!translated) {
-            return trimmedPrompt;
-        }
-
-        return decodeHtmlEntities(translated).trim();
-    } catch (error) {
-        console.warn('[relight] translatePromptToChinese failed. Falling back to original prompt.', error?.message || error);
-        return trimmedPrompt;
-    }
+    };
 }
 
-async function enhanceRelightPrompt(prompt) {
+async function fetchRelightImagePart(imageUrl) {
+    const trimmedImageUrl = typeof imageUrl === 'string' ? imageUrl.trim() : '';
+    if (!trimmedImageUrl) {
+        return null;
+    }
+
+    const dataUrlPart = parseDataUrlImagePart(trimmedImageUrl);
+    if (dataUrlPart) {
+        return dataUrlPart;
+    }
+
+    const response = await fetch(trimmedImageUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch relight image (${response.status} ${response.statusText})`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return {
+        inlineData: {
+            data: Buffer.from(arrayBuffer).toString('base64'),
+            mimeType: inferRelightImageMimeType(trimmedImageUrl, response.headers.get('content-type'))
+        }
+    };
+}
+
+async function enhanceRelightPrompt(prompt, imageUrl) {
     const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
     if (!trimmedPrompt) {
-        return '';
+        return {
+            enhancedPrompt: '',
+            usedImageContext: false,
+            usedFallback: false,
+            fallbackReason: ''
+        };
     }
 
     if (!geminiClient) {
-        return trimmedPrompt;
+        return {
+            enhancedPrompt: trimmedPrompt,
+            usedImageContext: false,
+            usedFallback: true,
+            fallbackReason: 'Gemini client is not configured.'
+        };
+    }
+
+    let imagePart = null;
+    let imageContextAvailable = false;
+
+    try {
+        imagePart = await fetchRelightImagePart(imageUrl);
+        imageContextAvailable = Boolean(imagePart);
+    } catch (error) {
+        console.warn('[relight] Failed to attach image context to prompt enhancer. Falling back to text-only enhancement.', error?.message || error);
     }
 
     try {
@@ -318,13 +329,15 @@ async function enhanceRelightPrompt(prompt) {
                 {
                     role: 'user',
                     parts: [
+                        ...(imagePart ? [imagePart] : []),
                         {
-                            text: `${RELIGHT_PROMPT_ENHANCER_GUIDELINES}\n\nUser prompt:\n${trimmedPrompt}`
+                            text: trimmedPrompt
                         }
                     ]
                 }
             ],
             config: {
+                systemInstruction: RELIGHT_PROMPT_ENHANCER_SYSTEM_INSTRUCTION,
                 thinkingConfig: {
                     thinkingLevel: 'MINIMAL'
                 },
@@ -334,13 +347,29 @@ async function enhanceRelightPrompt(prompt) {
 
         const enhancedPrompt = normalizePromptEnhancerOutput(response?.text || '');
         if (!enhancedPrompt) {
-            return trimmedPrompt;
+            return {
+                enhancedPrompt: trimmedPrompt,
+                usedImageContext: imageContextAvailable,
+                usedFallback: true,
+                fallbackReason: 'Prompt enhancer returned an empty response.'
+            };
         }
 
-        return normalizeRelightInstruction(enhancedPrompt) || enhancedPrompt;
+        const normalizedEnhancedPrompt = normalizeRelightInstruction(enhancedPrompt) || enhancedPrompt;
+        return {
+            enhancedPrompt: normalizedEnhancedPrompt,
+            usedImageContext: imageContextAvailable,
+            usedFallback: false,
+            fallbackReason: ''
+        };
     } catch (error) {
         console.warn('[relight] enhanceRelightPrompt failed. Falling back to the original prompt.', error?.message || error);
-        return trimmedPrompt;
+        return {
+            enhancedPrompt: trimmedPrompt,
+            usedImageContext: imageContextAvailable,
+            usedFallback: true,
+            fallbackReason: error?.message || 'Prompt enhancer failed.'
+        };
     }
 }
 
@@ -605,9 +634,17 @@ app.post('/api/generate-relight', async (req, res) => {
             return res.status(400).json({ error: 'imageUrl is required.' });
         }
 
-        const enhancedPrompt = await enhanceRelightPrompt(prompt);
+        const enhancementResult = await enhanceRelightPrompt(prompt, imageUrl);
+        const enhancedPrompt = enhancementResult?.enhancedPrompt || '';
         if (!enhancedPrompt) {
             return res.status(400).json({ error: 'A relight instruction is required.' });
+        }
+
+        const originalPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+        if (enhancementResult?.usedFallback && containsLatinLetters(enhancedPrompt) && containsLatinLetters(originalPrompt)) {
+            return res.status(502).json({
+                error: enhancementResult?.fallbackReason || 'Relight prompt enhancement failed. Please retry.'
+            });
         }
 
         const finalPrompt = buildRelightPrompt(enhancedPrompt);
@@ -634,7 +671,11 @@ app.post('/api/generate-relight', async (req, res) => {
             requestId,
             status: 'queued',
             pollUrl: `/api/generate-relight/${requestId}`,
-            prompt: finalPrompt
+            prompt: finalPrompt,
+            enhancedPrompt,
+            usedImageContext: Boolean(enhancementResult?.usedImageContext),
+            usedFallback: Boolean(enhancementResult?.usedFallback),
+            fallbackReason: enhancementResult?.fallbackReason || ''
         });
     } catch (error) {
         return sendApiError(res, error);
