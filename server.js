@@ -25,7 +25,7 @@ const DEFAULT_RELIGHT_LORA_PATH = 'https://huggingface.co/dx8152/Qwen-Image-Edit
 const GEMINI_PROMPT_ENHANCER_MODEL_ID = 'gemini-3.1-flash-lite-preview';
 const GEMINI_API_KEY = (
     process.env.GEMINI_API_KEY ||
-    'AIzaSyC4FRCjh4TmbOUBCc1Ud06PIxZMDGiFqRM'
+    ''
 ).trim();
 const RELIGHT_PROMPT_ENHANCER_SYSTEM_INSTRUCTION = [
     'You rewrite relighting instructions for the Qwen Image Edit 2509 Relight LoRA.',
@@ -43,6 +43,10 @@ const geminiClient = GoogleGenAI && GEMINI_API_KEY
     ? new GoogleGenAI({ apiKey: GEMINI_API_KEY })
     : null;
 const DEFAULT_RELIGHT_IMAGE_MIME_TYPE = 'image/jpeg';
+const RELIGHT_PROMPT_ENHANCER_TIMEOUT_MS = Math.max(
+    3000,
+    Number(process.env.RELIGHT_PROMPT_ENHANCER_TIMEOUT_MS || 12000)
+);
 
 if (!GEMINI_API_KEY) {
     console.warn('[relight] GEMINI_API_KEY is not set. English relight instructions cannot be enhanced into Chinese.');
@@ -267,7 +271,17 @@ function parseDataUrlImagePart(imageUrl) {
     };
 }
 
-async function fetchRelightImagePart(imageUrl) {
+function createTimeoutSignal(timeoutMs) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+        return AbortSignal.timeout(timeoutMs);
+    }
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), timeoutMs);
+    return controller.signal;
+}
+
+async function fetchRelightImagePart(imageUrl, signal) {
     const trimmedImageUrl = typeof imageUrl === 'string' ? imageUrl.trim() : '';
     if (!trimmedImageUrl) {
         return null;
@@ -278,7 +292,7 @@ async function fetchRelightImagePart(imageUrl) {
         return dataUrlPart;
     }
 
-    const response = await fetch(trimmedImageUrl);
+    const response = await fetch(trimmedImageUrl, { signal });
     if (!response.ok) {
         throw new Error(`Failed to fetch relight image (${response.status} ${response.statusText})`);
     }
@@ -314,9 +328,10 @@ async function enhanceRelightPrompt(prompt, imageUrl) {
 
     let imagePart = null;
     let imageContextAvailable = false;
+    const timeoutSignal = createTimeoutSignal(RELIGHT_PROMPT_ENHANCER_TIMEOUT_MS);
 
     try {
-        imagePart = await fetchRelightImagePart(imageUrl);
+        imagePart = await fetchRelightImagePart(imageUrl, timeoutSignal);
         imageContextAvailable = Boolean(imagePart);
     } catch (error) {
         console.warn('[relight] Failed to attach image context to prompt enhancer. Falling back to text-only enhancement.', error?.message || error);
@@ -338,6 +353,7 @@ async function enhanceRelightPrompt(prompt, imageUrl) {
             ],
             config: {
                 systemInstruction: RELIGHT_PROMPT_ENHANCER_SYSTEM_INSTRUCTION,
+                abortSignal: timeoutSignal,
                 thinkingConfig: {
                     thinkingLevel: 'MINIMAL'
                 },
@@ -364,11 +380,14 @@ async function enhanceRelightPrompt(prompt, imageUrl) {
         };
     } catch (error) {
         console.warn('[relight] enhanceRelightPrompt failed. Falling back to the original prompt.', error?.message || error);
+        const timeoutLike = error?.name === 'AbortError' || error?.name === 'TimeoutError' || /timed out/i.test(error?.message || '');
         return {
             enhancedPrompt: trimmedPrompt,
             usedImageContext: imageContextAvailable,
             usedFallback: true,
-            fallbackReason: error?.message || 'Prompt enhancer failed.'
+            fallbackReason: timeoutLike
+                ? `Prompt enhancer timed out after ${RELIGHT_PROMPT_ENHANCER_TIMEOUT_MS}ms.`
+                : (error?.message || 'Prompt enhancer failed.')
         };
     }
 }

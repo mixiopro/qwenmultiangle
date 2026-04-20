@@ -96,7 +96,7 @@ The app includes a dedicated **Relight** tab powered by fal's `fal-ai/qwen-image
 重新照明,<short Chinese instruction>
 ```
 
-- Export `GEMINI_API_KEY` on the remote instance for the prompt enhancer to work
+- Export `GEMINI_API_KEY` on the remote instance for the prompt enhancer to work. The relight enhancer does not ship with a fallback key.
 - LoRA is passed via `loras: [{ path, scale }]`
 - Default LoRA path points to:
   - `https://huggingface.co/dx8152/Qwen-Image-Edit-2509-Relight/resolve/main/Qwen-Edit-Relight.safetensors`
