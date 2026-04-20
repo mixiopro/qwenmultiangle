@@ -2906,6 +2906,9 @@ async function generateRelight() {
             addRelightLog('Error: No request ID returned from submit endpoint', 'error');
             throw new Error('No request ID was returned by submit endpoint.');
         }
+        if (submitResult?.prompt) {
+            addRelightLog(`Chinese prompt: ${submitResult.prompt}`, 'info');
+        }
 
         relightState.activeRequestId = requestId;
         addRelightLog(`Submitted relight job. requestId=${requestId}`, 'request');
