@@ -2,6 +2,13 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const { fal } = require('@fal-ai/client');
+let GoogleGenAI = null;
+
+try {
+    ({ GoogleGenAI } = require('@google/genai'));
+} catch (error) {
+    console.warn('[relight] @google/genai is not installed yet. Relight prompt enhancement will fall back to the raw user instruction until it is added.');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,6 +22,35 @@ const DEFAULT_LIGHT_TRANSFER_LORA_PATH = 'https://huggingface.co/dx8152/Qwen-Edi
 const GAUSSIAN_SPLASH_MODEL_ID = 'fal-ai/qwen-image-edit-2511/lora';
 const GAUSSIAN_SPLASH_FIXED_PROMPT = '高斯泼溅,参考图2的场景图，修复图1的场景图透视并修复空白区域';
 const DEFAULT_GAUSSIAN_SPLASH_LORA_PATH = 'https://huggingface.co/dx8152/Qwen-Image-Edit-2511-Gaussian-Splash/resolve/main/%E9%AB%98%E6%96%AF%E6%B3%BC%E6%BA%85-Sharp.safetensors';
+const RELIGHT_MODEL_ID = 'fal-ai/qwen-image-edit-2509-lora';
+const RELIGHT_TRIGGER_WORD = '重新照明';
+const DEFAULT_RELIGHT_LORA_PATH = 'https://huggingface.co/dx8152/Qwen-Image-Edit-2509-Relight/resolve/main/Qwen-Edit-Relight.safetensors';
+const GEMINI_PROMPT_ENHANCER_MODEL_ID = 'gemini-3.1-flash-lite-preview';
+const GEMINI_API_KEY = (
+    process.env.GEMINI_API_KEY ||
+    'AIzaSyC4FRCjh4TmbOUBCc1Ud06PIxZMDGiFqRM'
+).trim();
+const RELIGHT_PROMPT_ENHANCER_GUIDELINES = [
+    'You rewrite relighting instructions for the Qwen Image Edit 2509 Relight LoRA.',
+    'Rewrite the user input into one short, direct Chinese prompt.',
+    'Keep the user intent exactly. Do not add new subjects, scenes, objects, style changes, or details that were not requested.',
+    'Keep only lighting-related information such as light source, direction, softness, color temperature, mood, shadows, and reflections.',
+    'Use a concise command-like tone similar to "使用窗帘透光（柔和漫射）的光线对图片进行重新照明".',
+    'Do not output the trigger word "重新照明"; the backend adds it.',
+    'Do not explain, translate literally, or output bullets, quotes, or markdown.',
+    'If the request is vague, make the smallest useful rewrite without inventing specifics.',
+    'Return only the final Chinese prompt.'
+].join('\n');
+const geminiClient = GoogleGenAI && GEMINI_API_KEY
+    ? new GoogleGenAI({ apiKey: GEMINI_API_KEY })
+    : null;
+const GOOGLE_TRANSLATE_API_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
+const GOOGLE_TRANSLATE_API_KEY = (
+    process.env.GOOGLE_TRANSLATE_API_KEY ||
+    process.env.GOOGLE_CLOUD_TRANSLATE_API_KEY ||
+    process.env.GOOGLE_TRANSLATE_KEY ||
+    'AIzaSyD5mVr-yl_WRmw3xcJJYuXINA19KXOtyzo'
+).trim();
 const VIDEO_MODEL_BY_KEY = {
     seedance: 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video',
     kling26: 'fal-ai/kling-video/v2.6/standard/image-to-video',
@@ -150,6 +186,182 @@ function resolveGaussianSplashLoraPath() {
         : '';
 
     return envPath || DEFAULT_GAUSSIAN_SPLASH_LORA_PATH;
+}
+
+function normalizeRelightLoraScale(value) {
+    const parsedValue = Number(value);
+    if (!Number.isFinite(parsedValue)) {
+        return 0.75;
+    }
+
+    return Math.min(4, Math.max(0, parsedValue));
+}
+
+function resolveRelightLoraPath() {
+    const envPath = typeof process.env.QWEN_RELIGHT_LORA_PATH === 'string'
+        ? process.env.QWEN_RELIGHT_LORA_PATH.trim()
+        : '';
+
+    return envPath || DEFAULT_RELIGHT_LORA_PATH;
+}
+
+function normalizeRelightInstruction(prompt) {
+    const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+    if (!trimmedPrompt) {
+        return '';
+    }
+
+    return trimmedPrompt.replace(new RegExp(`^${RELIGHT_TRIGGER_WORD}[\\s,，]*`, 'i'), '').trim();
+}
+
+function buildRelightPrompt(prompt) {
+    const normalizedPrompt = normalizeRelightInstruction(prompt);
+    if (!normalizedPrompt) {
+        return RELIGHT_TRIGGER_WORD;
+    }
+    return `${RELIGHT_TRIGGER_WORD},${normalizedPrompt}`;
+}
+
+function normalizePromptEnhancerOutput(text) {
+    if (typeof text !== 'string') {
+        return '';
+    }
+
+    const firstLine = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0) || '';
+
+    return firstLine
+        .replace(/^(中文|提示词|prompt|output|输出)\s*[:：]\s*/i, '')
+        .replace(/^[`"'“”]+|[`"'“”]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function decodeHtmlEntities(text) {
+    if (typeof text !== 'string') {
+        return '';
+    }
+
+    return text
+        .replace(/&#(\d+);/g, (_, code) => {
+            const cp = Number(code);
+            if (!Number.isFinite(cp)) {
+                return '';
+            }
+            try {
+                return String.fromCodePoint(cp);
+            } catch (_) {
+                return '';
+            }
+        })
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => {
+            const cp = Number.parseInt(code, 16);
+            if (!Number.isFinite(cp)) {
+                return '';
+            }
+            try {
+                return String.fromCodePoint(cp);
+            } catch (_) {
+                return '';
+            }
+        })
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+}
+
+async function translatePromptToChinese(prompt) {
+    const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+    if (!trimmedPrompt) {
+        return '';
+    }
+
+    if (!GOOGLE_TRANSLATE_API_KEY) {
+        return trimmedPrompt;
+    }
+
+    try {
+        const response = await fetch(`${GOOGLE_TRANSLATE_API_ENDPOINT}?key=${encodeURIComponent(GOOGLE_TRANSLATE_API_KEY)}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+            },
+            body: new URLSearchParams({
+                q: trimmedPrompt,
+                target: 'zh',
+                format: 'text'
+            })
+        });
+
+        let payload;
+        try {
+            payload = await response.json();
+        } catch (error) {
+            throw new Error(`Unable to parse translation response: ${error.message}`);
+        }
+
+        if (!response.ok) {
+            throw new Error(payload?.error?.message || `Translate API request failed with status ${response.status}`);
+        }
+
+        const translated = payload?.data?.translations?.[0]?.translatedText;
+        if (!translated) {
+            return trimmedPrompt;
+        }
+
+        return decodeHtmlEntities(translated).trim();
+    } catch (error) {
+        console.warn('[relight] translatePromptToChinese failed. Falling back to original prompt.', error?.message || error);
+        return trimmedPrompt;
+    }
+}
+
+async function enhanceRelightPrompt(prompt) {
+    const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+    if (!trimmedPrompt) {
+        return '';
+    }
+
+    if (!geminiClient) {
+        return trimmedPrompt;
+    }
+
+    try {
+        const response = await geminiClient.models.generateContent({
+            model: GEMINI_PROMPT_ENHANCER_MODEL_ID,
+            contents: [
+                {
+                    role: 'user',
+                    parts: [
+                        {
+                            text: `${RELIGHT_PROMPT_ENHANCER_GUIDELINES}\n\nUser prompt:\n${trimmedPrompt}`
+                        }
+                    ]
+                }
+            ],
+            config: {
+                thinkingConfig: {
+                    thinkingLevel: 'MINIMAL'
+                },
+                maxOutputTokens: 64
+            }
+        });
+
+        const enhancedPrompt = normalizePromptEnhancerOutput(response?.text || '');
+        if (!enhancedPrompt) {
+            return trimmedPrompt;
+        }
+
+        return normalizeRelightInstruction(enhancedPrompt) || enhancedPrompt;
+    } catch (error) {
+        console.warn('[relight] enhanceRelightPrompt failed. Falling back to the original prompt.', error?.message || error);
+        return trimmedPrompt;
+    }
 }
 
 app.post('/api/upload', upload.single('image'), async (req, res) => {
@@ -495,6 +707,111 @@ app.get('/api/generate-gaussian-splash/:requestId', async (req, res) => {
         return res.json({
             status: 'failed',
             error: typeof fallbackMessage === 'string' ? fallbackMessage : 'Gaussian Splash generation failed.',
+            detail: queueStatus || null
+        });
+    } catch (error) {
+        return sendApiError(res, error);
+    }
+});
+
+app.post('/api/generate-relight', async (req, res) => {
+    try {
+        const { imageUrl, prompt, loraScale } = req.body || {};
+
+        if (!imageUrl) {
+            return res.status(400).json({ error: 'imageUrl is required.' });
+        }
+
+        const enhancedPrompt = await enhanceRelightPrompt(prompt);
+        if (!enhancedPrompt) {
+            return res.status(400).json({ error: 'A relight instruction is required.' });
+        }
+
+        const finalPrompt = buildRelightPrompt(enhancedPrompt);
+
+        const queueRequest = await fal.queue.submit(RELIGHT_MODEL_ID, {
+            input: {
+                prompt: finalPrompt,
+                image_urls: [imageUrl],
+                loras: [
+                    {
+                        path: resolveRelightLoraPath(),
+                        scale: normalizeRelightLoraScale(loraScale)
+                    }
+                ]
+            }
+        });
+
+        const requestId = queueRequest?.request_id || queueRequest?.requestId;
+        if (!requestId) {
+            return res.status(502).json({ error: 'No request ID was returned by the provider.' });
+        }
+
+        return res.status(202).json({
+            requestId,
+            status: 'queued',
+            pollUrl: `/api/generate-relight/${requestId}`,
+            prompt: finalPrompt
+        });
+    } catch (error) {
+        return sendApiError(res, error);
+    }
+});
+
+app.get('/api/generate-relight/:requestId', async (req, res) => {
+    try {
+        const requestId = req.params?.requestId;
+        if (!requestId) {
+            return res.status(400).json({ error: 'requestId is required.' });
+        }
+
+        const queueStatus = await fal.queue.status(RELIGHT_MODEL_ID, {
+            requestId,
+            logs: false
+        });
+
+        if (queueStatus?.status === 'IN_QUEUE') {
+            return res.json({ status: 'queued' });
+        }
+
+        if (queueStatus?.status === 'IN_PROGRESS') {
+            return res.json({ status: 'in_progress' });
+        }
+
+        if (queueStatus?.status === 'COMPLETED') {
+            try {
+                const result = await fal.queue.result(RELIGHT_MODEL_ID, { requestId });
+                const outputUrl = normalizeImageResult(result);
+                if (!outputUrl) {
+                    return res.json({
+                        status: 'failed',
+                        error: 'No image URL was returned by the provider.',
+                        detail: result?.data || result || null
+                    });
+                }
+
+                return res.json({ status: 'completed', imageUrl: outputUrl });
+            } catch (error) {
+                const statusCode = error?.status || error?.response?.status || 500;
+                const body = error?.body || error?.response?.data || null;
+                const message = body?.detail || body?.message || error?.message || 'Relight generation failed.';
+
+                if ([408, 429, 500, 502, 503, 504].includes(statusCode)) {
+                    return sendApiError(res, error);
+                }
+
+                return res.json({
+                    status: 'failed',
+                    error: message,
+                    detail: body
+                });
+            }
+        }
+
+        const fallbackMessage = queueStatus?.detail || queueStatus?.message || `Unexpected queue status: ${queueStatus?.status || 'unknown'}`;
+        return res.json({
+            status: 'failed',
+            error: typeof fallbackMessage === 'string' ? fallbackMessage : 'Relight generation failed.',
             detail: queueStatus || null
         });
     } catch (error) {

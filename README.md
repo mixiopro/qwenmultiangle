@@ -77,6 +77,32 @@ The app includes a dedicated **Light-Transfer** tab powered by fal's `fal-ai/qwe
 - Override LoRA path with backend env var:
   - `QWEN_LIGHT_TRANSFER_LORA_PATH`
 
+## Relight Workflow
+
+The app includes a dedicated **Relight** tab powered by fal's `fal-ai/qwen-image-edit-2509-lora` model.
+
+- Input 1 (`image_urls[0]`): source image to relight
+- Input 2: the user's English or Chinese lighting instruction
+- The backend rewrites the instruction with `gemini-3.1-flash-lite-preview` into a short Chinese prompt that stays close to the user's intent and does not add extra details
+- The wording style stays close to the README example, for example:
+
+```text
+使用窗帘透光（柔和漫射）的光线对图片进行重新照明
+```
+
+- Fixed trigger token is always `重新照明` and the final prompt is sent as:
+
+```text
+重新照明,<short Chinese instruction>
+```
+
+- Export `GEMINI_API_KEY` on the remote instance for the prompt enhancer to work
+- LoRA is passed via `loras: [{ path, scale }]`
+- Default LoRA path points to:
+  - `https://huggingface.co/dx8152/Qwen-Image-Edit-2509-Relight/resolve/main/Qwen-Edit-Relight.safetensors`
+- Override LoRA path with backend env var:
+  - `QWEN_RELIGHT_LORA_PATH`
+
 ## Project Structure
 
 ```

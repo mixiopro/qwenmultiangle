@@ -86,12 +86,24 @@ let gaussianSplashState = {
     runToken: 0
 };
 
+// ===== Relight State =====
+let relightState = {
+    uploadedImage: null,
+    uploadedImageBase64: null,
+    imageUrl: null,
+    sourceImageUrl: null,
+    isGenerating: false,
+    activeRequestId: null,
+    runToken: 0
+};
+
 // ===== DOM Elements =====
 const elements = {};
 const pathElements = {};
 const nextSceneElements = {};
 const lightTransferElements = {};
 const gaussianSplashElements = {};
+const relightElements = {};
 
 // ===== Seedance Segment Cache (localStorage) =====
 const AI_SEGMENTS_CACHE_KEY = 'qwenmultiangle_ai_segments_cache_v1';
@@ -288,6 +300,14 @@ function updateGaussianSplashButton() {
     }
 }
 
+function updateRelightButton() {
+    const hasImage = relightState.uploadedImage !== null || relightState.imageUrl !== null;
+    const hasPrompt = !!relightElements.userPrompt?.value?.trim();
+    if (relightElements.generateBtn) {
+        relightElements.generateBtn.disabled = !hasImage || !hasPrompt || relightState.isGenerating;
+    }
+}
+
 function showStatus(message, type = 'info') {
     elements.statusMessage.textContent = message;
     elements.statusMessage.className = `status-message ${type}`;
@@ -347,6 +367,21 @@ function showGaussianSplashStatus(message, type = 'info') {
 
 function hideGaussianSplashStatus() {
     gaussianSplashElements.statusMessage?.classList.add('hidden');
+}
+
+function showRelightStatus(message, type = 'info') {
+    const el = relightElements.statusMessage;
+    if (!el) return;
+    el.textContent = message;
+    el.className = `status-message ${type}`;
+    el.classList.remove('hidden');
+    if (type === 'success') {
+        setTimeout(() => el.classList.add('hidden'), 5000);
+    }
+}
+
+function hideRelightStatus() {
+    relightElements.statusMessage?.classList.add('hidden');
 }
 
 // ===== Logging System =====
@@ -483,6 +518,38 @@ function addGaussianSplashLog(message, type = 'info') {
 function clearGaussianSplashLogs() {
     if (gaussianSplashElements.logsContainer) {
         gaussianSplashElements.logsContainer.innerHTML = '<div class="log-entry info">Logs cleared.</div>';
+    }
+}
+
+function addRelightLog(message, type = 'info') {
+    const container = relightElements.logsContainer;
+    if (!container) return;
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+
+    const timestamp = document.createElement('span');
+    timestamp.className = 'log-timestamp';
+    timestamp.textContent = `[${getTimestamp()}]`;
+    entry.appendChild(timestamp);
+
+    let messageText = message;
+    if (typeof message === 'object') {
+        try {
+            messageText = JSON.stringify(message, null, 2);
+        } catch (e) {
+            messageText = String(message);
+        }
+    }
+
+    entry.appendChild(document.createTextNode(messageText));
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearRelightLogs() {
+    if (relightElements.logsContainer) {
+        relightElements.logsContainer.innerHTML = '<div class="log-entry info">Logs cleared.</div>';
     }
 }
 
@@ -1607,6 +1674,119 @@ function loadGaussianSplashImageFromUrl(url) {
     img.src = url;
 }
 
+function handleRelightImageUpload(file) {
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+        showRelightStatus(validation.error, 'error');
+        addRelightLog(`Error: ${validation.error}`, 'error');
+        return;
+    }
+
+    addRelightLog(`Uploading image: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${file.type})`, 'info');
+
+    relightState.imageUrl = null;
+    relightState.sourceImageUrl = null;
+    if (relightElements.imageUrlInput) {
+        relightElements.imageUrlInput.value = '';
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        relightState.uploadedImage = file;
+        relightState.uploadedImageBase64 = e.target.result;
+
+        relightElements.previewImage.src = e.target.result;
+        relightElements.previewImage.classList.remove('hidden');
+        relightElements.uploadPlaceholder.classList.add('hidden');
+        relightElements.clearImage.classList.remove('hidden');
+        relightElements.uploadZone.classList.add('has-image');
+
+        addRelightLog(`Image loaded successfully. Base64 size: ${(e.target.result.length / 1024).toFixed(1)} KB`, 'info');
+        updateRelightButton();
+        hideRelightStatus();
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearRelightImage() {
+    relightState.uploadedImage = null;
+    relightState.uploadedImageBase64 = null;
+    relightState.imageUrl = null;
+    relightState.sourceImageUrl = null;
+    relightState.activeRequestId = null;
+
+    relightElements.previewImage.src = '';
+    relightElements.previewImage.classList.add('hidden');
+    relightElements.uploadPlaceholder.classList.remove('hidden');
+    relightElements.clearImage.classList.add('hidden');
+    relightElements.uploadZone.classList.remove('has-image');
+    relightElements.imageUrlInput.value = '';
+
+    relightElements.uploadPlaceholder.innerHTML = `
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p>Drop image here or click to upload</p>
+    `;
+
+    updateRelightButton();
+}
+
+function loadRelightImageFromUrl(url) {
+    const validation = validateImageUrl(url);
+    if (!validation.valid) {
+        showRelightStatus(validation.error, 'error');
+        addRelightLog(`Error: ${validation.error}`, 'error');
+        return;
+    }
+
+    url = url.trim();
+
+    if (validation.warning) {
+        addRelightLog(`Warning: ${validation.warning}`, 'warn');
+    }
+
+    addRelightLog(`Loading image from URL: ${url}`, 'info');
+    showRelightStatus('Loading image...', 'info');
+
+    relightState.uploadedImage = null;
+    relightState.uploadedImageBase64 = null;
+    relightState.imageUrl = url;
+    relightState.sourceImageUrl = url;
+
+    relightElements.uploadPlaceholder.innerHTML = `
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <p style="font-size: 11px; word-break: break-all; color: var(--accent);">URL loaded</p>
+        <p style="font-size: 10px; word-break: break-all; opacity: 0.6;">${url.length > 40 ? url.substring(0, 40) + '...' : url}</p>
+    `;
+    relightElements.clearImage.classList.remove('hidden');
+    relightElements.uploadZone.classList.add('has-image');
+    updateRelightButton();
+
+    const img = new Image();
+    img.onload = () => {
+        relightElements.previewImage.src = url;
+        relightElements.previewImage.classList.remove('hidden');
+        relightElements.uploadPlaceholder.classList.add('hidden');
+        addRelightLog('Image preview loaded successfully', 'info');
+        hideRelightStatus();
+    };
+
+    img.onerror = () => {
+        addRelightLog('Could not preview image (CORS/network), but URL is set for generation', 'warn');
+        relightElements.previewImage.classList.add('hidden');
+        relightElements.uploadPlaceholder.classList.remove('hidden');
+        hideRelightStatus();
+    };
+
+    img.src = url;
+}
+
 function applyLightTransferImageUrlToUi(kind, url) {
     const isSource = kind === 'source';
     const uploadPlaceholder = isSource ? lightTransferElements.sourceUploadPlaceholder : lightTransferElements.referenceUploadPlaceholder;
@@ -1945,6 +2125,68 @@ async function downloadImage() {
 
 function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollRelightStatus(requestId, runToken, options = {}) {
+    const pollIntervalMs = options.pollIntervalMs || 2000;
+    const timeoutMs = options.timeoutMs || 180000;
+    const startedAt = Date.now();
+    let lastUiStatus = null;
+
+    while (true) {
+        if (relightState.runToken !== runToken) {
+            throw new Error('A newer relight run started. Ignoring stale response.');
+        }
+
+        if (Date.now() - startedAt > timeoutMs) {
+            throw new Error('Relight generation timed out while waiting for provider completion. Please try again.');
+        }
+
+        const statusResult = await apiRequest(`/api/generate-relight/${encodeURIComponent(requestId)}`);
+
+        if (relightState.runToken !== runToken) {
+            throw new Error('A newer relight run started. Ignoring stale response.');
+        }
+
+        if (statusResult?.status === 'queued') {
+            if (lastUiStatus !== 'queued') {
+                showRelightStatus('Relight queued... waiting for provider.', 'info');
+                addRelightLog('Queue status: queued', 'info');
+                lastUiStatus = 'queued';
+            }
+            await delay(pollIntervalMs);
+            continue;
+        }
+
+        if (statusResult?.status === 'in_progress') {
+            if (lastUiStatus !== 'in_progress') {
+                showRelightStatus('Generating relight... in progress.', 'info');
+                addRelightLog('Queue status: in progress', 'info');
+                lastUiStatus = 'in_progress';
+            }
+            await delay(pollIntervalMs);
+            continue;
+        }
+
+        if (statusResult?.status === 'completed') {
+            const outputImageUrl = statusResult?.imageUrl;
+            if (!outputImageUrl) {
+                addRelightLog('Error: Completed status returned without an image URL', 'error');
+                throw new Error('No image in completed response. Check logs for details.');
+            }
+            return outputImageUrl;
+        }
+
+        if (statusResult?.status === 'failed') {
+            const providerError = new Error(
+                statusResult?.error || formatError(statusResult?.detail || statusResult)
+            );
+            providerError.body = statusResult;
+            throw providerError;
+        }
+
+        throw new Error(`Unexpected status from relight polling: ${statusResult?.status || 'unknown'}`);
+    }
 }
 
 async function pollNextSceneStatus(requestId, runToken, options = {}) {
@@ -2601,6 +2843,148 @@ async function downloadGaussianSplashImage() {
     }
 }
 
+async function generateRelight() {
+    const instruction = relightElements.userPrompt?.value?.trim() || '';
+
+    if (!relightState.uploadedImage && !relightState.imageUrl) {
+        showRelightStatus('Please upload an image or provide a URL', 'error');
+        addRelightLog('Error: No image provided', 'error');
+        return;
+    }
+
+    if (!instruction) {
+        showRelightStatus('Please enter a relight instruction', 'error');
+        addRelightLog('Error: No relight instruction provided', 'error');
+        return;
+    }
+
+    relightState.isGenerating = true;
+    relightState.runToken += 1;
+    const runToken = relightState.runToken;
+    relightState.activeRequestId = null;
+    updateRelightButton();
+
+    relightElements.generateBtn.classList.add('generating');
+    relightElements.generateBtn.querySelector('.btn-text').textContent = 'Generating...';
+    relightElements.generateBtn.querySelector('.btn-loader').classList.remove('hidden');
+    relightElements.outputContainer.classList.add('loading');
+    relightElements.outputPlaceholder.classList.add('loading');
+
+    hideRelightStatus();
+    addRelightLog('Calling backend relight API...', 'info');
+    addRelightLog(`Instruction: ${instruction}`, 'info');
+    addRelightLog(`LoRA scale: ${relightElements.loraScale?.value || '0.75'}`, 'info');
+
+    try {
+        let imageUrl = relightState.imageUrl;
+
+        if (!imageUrl) {
+            showRelightStatus('Uploading image...', 'info');
+            addRelightLog('Uploading image via backend...', 'request');
+            imageUrl = await uploadImageToBackend(relightState.uploadedImage);
+            relightState.sourceImageUrl = imageUrl;
+            addRelightLog(`Image uploaded: ${imageUrl}`, 'response');
+        } else {
+            relightState.sourceImageUrl = imageUrl;
+            addRelightLog(`Using provided URL: ${imageUrl}`, 'info');
+        }
+
+        showRelightStatus('Submitting relight job...', 'info');
+
+        const submitResult = await apiRequest('/api/generate-relight', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                imageUrl,
+                prompt: instruction,
+                loraScale: relightElements.loraScale?.value || '0.75'
+            })
+        });
+
+        const requestId = submitResult?.requestId;
+        if (!requestId) {
+            addRelightLog('Error: No request ID returned from submit endpoint', 'error');
+            throw new Error('No request ID was returned by submit endpoint.');
+        }
+
+        relightState.activeRequestId = requestId;
+        addRelightLog(`Submitted relight job. requestId=${requestId}`, 'request');
+        showRelightStatus('Relight queued... waiting for provider.', 'info');
+
+        const outputImageUrl = await pollRelightStatus(requestId, runToken, {
+            pollIntervalMs: 2000,
+            timeoutMs: 180000
+        });
+
+        if (relightState.runToken !== runToken) {
+            return;
+        }
+
+        relightElements.outputImage.src = outputImageUrl;
+        relightElements.outputImage.classList.remove('hidden');
+        relightElements.outputPlaceholder.classList.add('hidden');
+        relightElements.downloadBtn.classList.remove('hidden');
+        relightElements.outputContainer.classList.add('success');
+        setTimeout(() => {
+            relightElements.outputContainer.classList.remove('success');
+        }, 600);
+
+        addRelightLog(`Success! Image URL: ${outputImageUrl.substring(0, 80)}...`, 'info');
+        showRelightStatus('Relight generated successfully!', 'success');
+    } catch (error) {
+        if (relightState.runToken !== runToken) {
+            return;
+        }
+
+        console.error('Relight generation error:', error);
+        const failedPayload = error?.body && error.body.status === 'failed' ? error.body : null;
+        const errorMsg = failedPayload
+            ? (failedPayload.error || formatError(failedPayload.detail || failedPayload))
+            : formatError(error?.body || error);
+        addRelightLog(`Error: ${errorMsg}`, 'error');
+
+        if (failedPayload?.detail) {
+            addRelightLog(`Provider detail: ${JSON.stringify(failedPayload.detail, null, 2)}`, 'error');
+        } else if (error?.body && typeof error.body === 'object') {
+            addRelightLog(`Error body: ${JSON.stringify(error.body, null, 2)}`, 'error');
+        }
+
+        showRelightStatus(`Error: ${errorMsg}`, 'error');
+    } finally {
+        if (relightState.runToken === runToken) {
+            relightState.isGenerating = false;
+            relightState.activeRequestId = null;
+            updateRelightButton();
+            relightElements.generateBtn.classList.remove('generating');
+            relightElements.generateBtn.querySelector('.btn-text').textContent = 'Generate Relight';
+            relightElements.generateBtn.querySelector('.btn-loader').classList.add('hidden');
+            relightElements.outputContainer.classList.remove('loading');
+            relightElements.outputPlaceholder.classList.remove('loading');
+        }
+    }
+}
+
+async function downloadRelightImage() {
+    const imageUrl = relightElements.outputImage?.src;
+    if (!imageUrl) return;
+
+    try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mixio-relight-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        window.open(imageUrl, '_blank');
+    }
+}
+
 function setupLightTransferEventListeners() {
     lightTransferElements.sourceImageInput?.addEventListener('change', (e) => {
         if (e.target.files?.[0]) {
@@ -2725,6 +3109,57 @@ function setupGaussianSplashEventListeners() {
         e.preventDefault();
         e.stopPropagation();
         clearGaussianSplashLogs();
+    });
+}
+
+function setupRelightEventListeners() {
+    relightElements.imageInput?.addEventListener('change', (e) => {
+        if (e.target.files?.[0]) {
+            handleRelightImageUpload(e.target.files[0]);
+        }
+    });
+
+    relightElements.uploadZone?.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        relightElements.uploadZone.classList.add('drag-over');
+    });
+
+    relightElements.uploadZone?.addEventListener('dragleave', () => {
+        relightElements.uploadZone.classList.remove('drag-over');
+    });
+
+    relightElements.uploadZone?.addEventListener('drop', (e) => {
+        e.preventDefault();
+        relightElements.uploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files?.[0]) {
+            handleRelightImageUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    relightElements.clearImage?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearRelightImage();
+    });
+
+    relightElements.loadUrlBtn?.addEventListener('click', () => {
+        loadRelightImageFromUrl(relightElements.imageUrlInput.value);
+    });
+
+    relightElements.imageUrlInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            loadRelightImageFromUrl(relightElements.imageUrlInput.value);
+        }
+    });
+
+    relightElements.userPrompt?.addEventListener('input', updateRelightButton);
+    relightElements.loraScale?.addEventListener('change', updateRelightButton);
+    relightElements.generateBtn?.addEventListener('click', generateRelight);
+    relightElements.downloadBtn?.addEventListener('click', downloadRelightImage);
+    relightElements.clearLogsBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearRelightLogs();
     });
 }
 
@@ -3005,6 +3440,13 @@ function setupTabSwitching() {
                     updateGaussianSplashButton();
                 }, 50);
             }
+
+            if (targetTab === 'relight') {
+                setTimeout(() => {
+                    syncRelightImageFromSingleAngle();
+                    updateRelightButton();
+                }, 50);
+            }
         });
     });
 }
@@ -3097,6 +3539,50 @@ function syncNextSceneImageFromSingleAngle() {
 
         addNextSceneLog('Synced image from Single Angle tab (uploaded file)', 'info');
     }
+}
+
+function syncRelightImageFromSingleAngle() {
+    if (relightState.imageUrl || relightState.uploadedImage || relightState.uploadedImageBase64) return;
+    if (!state.imageUrl && !state.uploadedImage && !state.uploadedImageBase64) return;
+
+    if (state.imageUrl) {
+        relightState.imageUrl = state.imageUrl;
+        relightState.sourceImageUrl = state.imageUrl;
+        relightState.uploadedImage = null;
+        relightState.uploadedImageBase64 = null;
+
+        if (relightElements.imageUrlInput) relightElements.imageUrlInput.value = state.imageUrl;
+        if (relightElements.previewImage) {
+            relightElements.previewImage.src = state.imageUrl;
+            relightElements.previewImage.classList.remove('hidden');
+        }
+        if (relightElements.uploadPlaceholder) relightElements.uploadPlaceholder.classList.add('hidden');
+        if (relightElements.clearImage) relightElements.clearImage.classList.remove('hidden');
+        if (relightElements.uploadZone) relightElements.uploadZone.classList.add('has-image');
+
+        addRelightLog('Synced image from Single Angle tab (URL)', 'info');
+        return;
+    }
+
+    if (state.uploadedImageBase64 && state.uploadedImage) {
+        relightState.uploadedImage = state.uploadedImage;
+        relightState.uploadedImageBase64 = state.uploadedImageBase64;
+        relightState.imageUrl = null;
+        relightState.sourceImageUrl = null;
+
+        if (relightElements.imageUrlInput) relightElements.imageUrlInput.value = '';
+        if (relightElements.previewImage) {
+            relightElements.previewImage.src = state.uploadedImageBase64;
+            relightElements.previewImage.classList.remove('hidden');
+        }
+        if (relightElements.uploadPlaceholder) relightElements.uploadPlaceholder.classList.add('hidden');
+        if (relightElements.clearImage) relightElements.clearImage.classList.remove('hidden');
+        if (relightElements.uploadZone) relightElements.uploadZone.classList.add('has-image');
+
+        addRelightLog('Synced image from Single Angle tab (uploaded file)', 'info');
+    }
+
+    updateRelightButton();
 }
 
 async function ensurePathSourceImageUrl() {
@@ -4813,6 +5299,25 @@ function init() {
     gaussianSplashElements.logsContainer = document.getElementById('gaussian-splash-logs-container');
     gaussianSplashElements.clearLogsBtn = document.getElementById('gaussian-splash-clear-logs');
 
+    // Cache DOM elements - Relight Tab
+    relightElements.uploadZone = document.getElementById('relight-upload-zone');
+    relightElements.imageInput = document.getElementById('relight-image-input');
+    relightElements.uploadPlaceholder = document.getElementById('relight-upload-placeholder');
+    relightElements.previewImage = document.getElementById('relight-preview-image');
+    relightElements.clearImage = document.getElementById('relight-clear-image');
+    relightElements.imageUrlInput = document.getElementById('relight-image-url-input');
+    relightElements.loadUrlBtn = document.getElementById('relight-load-url-btn');
+    relightElements.userPrompt = document.getElementById('relight-user-prompt');
+    relightElements.loraScale = document.getElementById('relight-lora-scale');
+    relightElements.generateBtn = document.getElementById('relight-generate-btn');
+    relightElements.outputContainer = document.getElementById('relight-output-container');
+    relightElements.outputPlaceholder = document.getElementById('relight-output-placeholder');
+    relightElements.outputImage = document.getElementById('relight-output-image');
+    relightElements.downloadBtn = document.getElementById('relight-download-btn');
+    relightElements.statusMessage = document.getElementById('relight-status-message');
+    relightElements.logsContainer = document.getElementById('relight-logs-container');
+    relightElements.clearLogsBtn = document.getElementById('relight-clear-logs');
+
     // Initialize Single Angle
     setupEventListeners();
     initThreeJS();
@@ -4840,6 +5345,10 @@ function init() {
     // Initialize Gaussian Splash
     setupGaussianSplashEventListeners();
     updateGaussianSplashButton();
+
+    // Initialize Relight
+    setupRelightEventListeners();
+    updateRelightButton();
 }
 
 // Start when DOM is ready
@@ -4848,4 +5357,3 @@ if (document.readyState === 'loading') {
 } else {
     init();
 }
-

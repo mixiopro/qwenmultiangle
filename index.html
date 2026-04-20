@@ -53,6 +53,12 @@
                 </svg>
                 Light-Transfer
             </button>
+            <button class="tab-btn" data-tab="relight">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2l3.5 7H22l-5.5 4 2 7-6.5-4.7L3.5 20l2-7L0 9h6.5z"/>
+                </svg>
+                Relight
+            </button>
             <button class="tab-btn" data-tab="gaussian-splash">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2v5"/>
@@ -556,6 +562,106 @@
                             </summary>
                             <div id="light-transfer-logs-container" class="logs-container">
                                 <div class="log-entry info">Light-Transfer mode ready. Add source and reference images.</div>
+                            </div>
+                        </details>
+                    </section>
+                </main>
+            </div>
+
+            <!-- ========== RELIGHT TAB ========== -->
+            <div class="tab-panel" id="relight-panel">
+                <main class="main-content">
+                    <section class="left-panel">
+                        <div class="panel-card upload-card">
+                            <h3 class="card-title">Input Image</h3>
+                            <label class="upload-zone" id="relight-upload-zone" for="relight-image-input">
+                                <input type="file" id="relight-image-input" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" hidden>
+                                <div class="upload-placeholder" id="relight-upload-placeholder">
+                                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    <p>Drop image here or click to upload</p>
+                                </div>
+                                <img id="relight-preview-image" class="preview-image hidden" alt="Relight preview">
+                                <button id="relight-clear-image" class="clear-btn hidden" type="button">×</button>
+                            </label>
+                            <div class="url-input-section">
+                                <div class="url-divider"><span>or paste URL</span></div>
+                                <div class="url-input-wrapper">
+                                    <input type="text" id="relight-image-url-input" placeholder="https://example.com/image.jpg" autocomplete="off">
+                                    <button id="relight-load-url-btn" class="load-url-btn">Load</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel-card">
+                            <h3 class="card-title">Relight Settings</h3>
+                            <p class="card-subtitle">Trigger word is fixed to <strong>重新照明</strong>. Your instruction can be in any language.</p>
+                            <div class="setting-group">
+                                <label for="relight-fixed-prompt">Fixed Prompt</label>
+                                <textarea id="relight-fixed-prompt" rows="2" readonly>重新照明</textarea>
+                            </div>
+                            <div class="setting-group">
+                                <label for="relight-user-prompt">Relight instruction (translated on server)</label>
+                                <textarea id="relight-user-prompt" rows="3" placeholder="Use soft window light to relight the image"></textarea>
+                            </div>
+                            <div class="setting-group">
+                                <label for="relight-lora-scale">LoRA Scale</label>
+                                <select id="relight-lora-scale">
+                                    <option value="0.5">0.5</option>
+                                    <option value="0.75" selected>0.75 (Recommended)</option>
+                                    <option value="1.0">1.0</option>
+                                    <option value="1.25">1.25</option>
+                                </select>
+                                <p class="setting-help">LoRA path is managed on backend (env override supported).</p>
+                            </div>
+                        </div>
+
+                        <button id="relight-generate-btn" class="generate-btn" disabled>
+                            <span class="btn-text">Generate Relight</span>
+                            <span class="btn-loader hidden">
+                                <svg class="spinner" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31.4" stroke-dashoffset="10"/>
+                                </svg>
+                            </span>
+                        </button>
+                    </section>
+
+                    <section class="right-panel">
+                        <div class="panel-card output-card">
+                            <h3 class="card-title">Output</h3>
+                            <div class="output-container" id="relight-output-container">
+                                <div class="output-placeholder" id="relight-output-placeholder">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                                        <polyline points="21 15 16 10 5 21"/>
+                                    </svg>
+                                    <p>Generated relight output will appear here</p>
+                                </div>
+                                <img id="relight-output-image" class="output-image hidden" alt="Relight output">
+                            </div>
+                            <button id="relight-download-btn" class="download-btn hidden">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Download
+                            </button>
+                        </div>
+
+                        <div id="relight-status-message" class="status-message hidden"></div>
+
+                        <details class="logs-panel" open>
+                            <summary class="logs-header">
+                                <span>🔧 Debug Logs</span>
+                                <button id="relight-clear-logs" class="clear-logs-btn">Clear</button>
+                            </summary>
+                            <div id="relight-logs-container" class="logs-container">
+                                <div class="log-entry info">Relight mode ready. Add an image and enter a relight instruction.</div>
                             </div>
                         </details>
                     </section>
