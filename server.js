@@ -642,8 +642,13 @@ app.post('/api/generate-relight', async (req, res) => {
 
         const originalPrompt = typeof prompt === 'string' ? prompt.trim() : '';
         if (enhancementResult?.usedFallback && containsLatinLetters(enhancedPrompt) && containsLatinLetters(originalPrompt)) {
-            return res.status(502).json({
-                error: enhancementResult?.fallbackReason || 'Relight prompt enhancement failed. Please retry.'
+            return res.status(422).json({
+                error: enhancementResult?.fallbackReason || 'Relight prompt enhancement failed. Please retry.',
+                detail: {
+                    enhancedPrompt,
+                    usedImageContext: Boolean(enhancementResult?.usedImageContext),
+                    usedFallback: true
+                }
             });
         }
 
